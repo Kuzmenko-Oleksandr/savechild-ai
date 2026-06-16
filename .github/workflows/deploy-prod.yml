@@ -31,12 +31,12 @@ jobs:
             --exclude="storage/**" \
             --exclude="public/build" \
             --exclude=".github" \
-            -e "ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no" \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 -o PreferredAuthentications=publickey" \
             ./ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/var/www/savechild/
 
       - name: Install deps + build + migrate (PROD)
         run: |
-          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no \
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 -o PreferredAuthentications=publickey \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'SSH'
             set -e
             cd /var/www/savechild
