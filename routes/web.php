@@ -7,9 +7,13 @@ use Inertia\Inertia;
 /**
  * Deterministic demo dataset (~5000 children) for the SafeChild frontend.
  * Photos are gender-matched: name gender === photo gender.
+ *
+ * Guarded with function_exists so route:cache (which can include this file
+ * more than once) does not redeclare the helpers.
  */
-function safechild_dataset(): array
-{
+if (! function_exists('safechild_dataset')) {
+    function safechild_dataset(): array
+    {
     static $cache = null;
     if ($cache !== null) {
         return $cache;
@@ -54,16 +58,19 @@ function safechild_dataset(): array
         ];
     }
 
-    return $cache = $rows;
+        return $cache = $rows;
+    }
 }
 
-function safechild_trends(): array
-{
-    return [
-        ['id' => 'feb', 'range' => '05 Feb - 06 March', 'labels' => ['05.02', '12.02', '19.02', '26.02', '06.03'], 'points' => [700, 720, 820, 690, 760, 880, 620, 1000, 760, 850, 690, 800, 720, 760, 900]],
-        ['id' => 'mar', 'range' => '07 March - 06 April', 'labels' => ['07.03', '14.03', '21.03', '28.03', '06.04'], 'points' => [620, 580, 640, 720, 680, 540, 600, 720, 800, 760, 690, 640, 580, 700, 760]],
-        ['id' => 'apr', 'range' => '07 April - 06 May', 'labels' => ['07.04', '14.04', '21.04', '28.04', '06.05'], 'points' => [500, 560, 520, 480, 600, 660, 720, 640, 580, 700, 760, 820, 880, 900, 960]],
-    ];
+if (! function_exists('safechild_trends')) {
+    function safechild_trends(): array
+    {
+        return [
+            ['id' => 'feb', 'range' => '05 Feb - 06 March', 'labels' => ['05.02', '12.02', '19.02', '26.02', '06.03'], 'points' => [700, 720, 820, 690, 760, 880, 620, 1000, 760, 850, 690, 800, 720, 760, 900]],
+            ['id' => 'mar', 'range' => '07 March - 06 April', 'labels' => ['07.03', '14.03', '21.03', '28.03', '06.04'], 'points' => [620, 580, 640, 720, 680, 540, 600, 720, 800, 760, 690, 640, 580, 700, 760]],
+            ['id' => 'apr', 'range' => '07 April - 06 May', 'labels' => ['07.04', '14.04', '21.04', '28.04', '06.05'], 'points' => [500, 560, 520, 480, 600, 660, 720, 640, 580, 700, 760, 820, 880, 900, 960]],
+        ];
+    }
 }
 
 Route::get('/', fn () => Inertia::render('safechild/Dashboard', [
