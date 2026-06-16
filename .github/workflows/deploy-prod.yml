@@ -61,12 +61,13 @@ jobs:
             php artisan optimize:clear
             php artisan event:clear || true
             php artisan config:cache
-            php artisan queue:restart
-            php artisan route:cache || true
             php artisan view:cache || true
+            # NOTE: no route:cache — routes use closures + helper functions in
+            # web.php, which are not available when routes are served from cache.
+            php artisan route:clear || true
+            php artisan queue:restart
 
-            # права только на кеши/логи (НЕ трогаем storage/app/public)
-            chmod -R ug+rwx bootstrap/cache storage/framework storage/logs || true
-            find storage/framework storage/logs -type d -exec chmod 775 {} \; || true
-            find storage/framework storage/logs -type f -exec chmod 664 {} \; || true
+            # ownership/permissions for php-fpm (www-data), reset on every deploy
+            chown -R www-data:www-data storage bootstrap/cache
+            chmod -R ug+rwX storage bootstrap/cache
           SSH
