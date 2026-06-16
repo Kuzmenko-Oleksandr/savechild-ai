@@ -1,6 +1,6 @@
 # Deploy — SafeChild (GitHub Actions → Zomro)
 
-CI builds on every push to `main`: the runner rsyncs the source to the server,
+CI builds on every push to `master`: the runner rsyncs the source to the server,
 then over SSH runs `composer install`, `npm run build`, migrations and cache
 warmup. Native stack (no Docker in prod): PHP-FPM + Nginx + PostgreSQL + Redis.
 
@@ -50,6 +50,12 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y node
 # --- deploy user + app dir ---
 adduser --disabled-password --gecos "" deploy
 mkdir -p /var/www/savechild && chown -R deploy:www-data /var/www/savechild
+
+# storage skeleton — CI excludes storage/** from rsync, so create it once:
+sudo -u deploy mkdir -p /var/www/savechild/storage/app/public \
+  /var/www/savechild/storage/framework/{cache/data,sessions,views} \
+  /var/www/savechild/storage/logs \
+  /var/www/savechild/bootstrap/cache
 # add the deploy key's PUBLIC part:
 mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
 echo "ssh-ed25519 AAAA...your savechild_deploy.pub..." >> /home/deploy/.ssh/authorized_keys
@@ -142,10 +148,10 @@ systemctl enable --now savechild-queue
 
 1. Add the 4 secrets (step 1).
 2. Provision the server once (step 2).
-3. Push to `main` — or run the workflow manually (Actions → **Deploy PROD** → Run workflow).
+3. Push to `master` — or run the workflow manually (Actions → **Deploy PROD** → Run workflow).
 
 ```bash
-git add -A && git commit -m "Deploy SafeChild" && git push origin main
+git add -A && git commit -m "Deploy SafeChild" && git push origin master
 ```
 
 Open **http://188.137.240.18**.
