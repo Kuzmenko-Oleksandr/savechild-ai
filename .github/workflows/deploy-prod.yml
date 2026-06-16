@@ -1,0 +1,63 @@
+name: Deploy PROD
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Rsync code to server (PROD)
+        run: |
+          rsync -az --delete \
+            --no-perms --no-owner --no-group --no-times \
+            --exclude=".git" \
+            --exclude="node_modules" \
+            --exclude="vendor" \
+            --exclude=".env" \
+            --exclude="storage/**" \
+            --exclude="public/build" \
+            --exclude=".github" \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no" \
+            ./ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/var/www/savechild/
+
+      - name: Install deps + build + migrate (PROD)
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'SSH'
+            set -e
+            cd /var/www/savechild
+
+            composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+            npm ci
+            npm run build
+
+            php artisan storage:link || true
+            php artisan migrate --force
+
+            php artisan optimize:clear
+            php artisan event:clear || true
+            php artisan config:cache
+            php artisan queue:restart
+            php artisan route:cache || true
+            php artisan view:cache || true
+
+            # права только на кеши/логи (НЕ трогаем storage/app/public)
+            chmod -R ug+rwx bootstrap/cache storage/framework storage/logs || true
+            find storage/framework storage/logs -type d -exec chmod 775 {} \; || true
+            find storage/framework storage/logs -type f -exec chmod 664 {} \; || true
+          SSH
