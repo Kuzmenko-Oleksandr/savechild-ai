@@ -29,6 +29,7 @@ jobs:
             --exclude="vendor" \
             --exclude=".env" \
             --exclude="storage/**" \
+            --exclude="bootstrap/cache/**" \
             --exclude="public/build" \
             --exclude=".github" \
             -e "ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 -o PreferredAuthentications=publickey" \
@@ -40,6 +41,14 @@ jobs:
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'SSH'
             set -e
             cd /var/www/savechild
+
+            # ensure writable runtime dirs exist (not shipped via rsync)
+            mkdir -p bootstrap/cache \
+              storage/app/public \
+              storage/framework/cache/data \
+              storage/framework/sessions \
+              storage/framework/views \
+              storage/logs
 
             composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
