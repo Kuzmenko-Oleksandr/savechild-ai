@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
 import {
     ChevronDown,
     ChevronRight,
@@ -13,7 +12,9 @@ import {
     Shield,
     Sparkles,
 } from '@lucide/vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import RiskBadge from '@/components/safechild/RiskBadge.vue';
+import PillTabs from '@/components/safechild/PillTabs.vue';
 
 interface RiskFactor {
     label: string;
@@ -51,8 +52,6 @@ const props = defineProps<{
         contact: string;
         address: string;
     };
-    aiSummary: string;
-    recommendations: string[];
     eventHistory: EventItem[];
     riskFactors: RiskFactor[];
     notifications: NotifItem[];
@@ -66,6 +65,27 @@ const badge: Record<string, { cls: string; label: string }> = {
 
 const expanded = ref<number | null>(null); // initial state: collapsed
 const confirmTarget = ref<NotifItem | null>(null);
+const aiSummary = ref('');
+const aiKeyFactors = ref<string[]>([]);
+const aiDisclaimer = ref('');
+const recommendations = ref<string[]>([]);
+const aiLoading = ref(true);
+const aiError = ref('');
+const aiBorderAnimating = ref(true);
+const profileCard = ref<HTMLElement | null>(null);
+const aiScroll = ref<HTMLElement | null>(null);
+const aiScrollTrack = ref<HTMLElement | null>(null);
+const profileHeight = ref<number | null>(null);
+const isLargeScreen = ref(false);
+const scrollThumbTop = ref(0);
+const scrollThumbHeight = ref(0);
+let profileResizeObserver: ResizeObserver | null = null;
+let aiScrollResizeObserver: ResizeObserver | null = null;
+
+// Border spin duration in CSS (.ai-summary-border-spin). Must stay in sync.
+const AI_BORDER_CYCLE_MS = 1600;
+// Stamp the moment the spinner starts so we can align the stop with a full cycle.
+let aiBorderStartedAt = 0;
 
 function toggle(id: number) {
     expanded.value = expanded.value === id ? null : id;
@@ -74,7 +94,10 @@ function take(n: NotifItem) {
     router.post(`/notifications/${n.id}/take`, {}, { preserveScroll: true });
 }
 function resolve() {
-    if (!confirmTarget.value) return;
+    if (!confirmTarget.value) {
+        return;
+    }
+
     router.post(
         `/notifications/${confirmTarget.value.id}/resolve`,
         {},
@@ -98,8 +121,157 @@ const period = ref<(typeof periods)[number]['id']>('6');
 
 const visibleEvents = computed(() => {
     const max = periods.find((p) => p.id === period.value)!.max;
+
     return props.eventHistory.filter((e) => e.months <= max);
 });
+
+const aiCardStyle = computed(() => {
+    if (!isLargeScreen.value || !profileHeight.value) {
+        return {};
+    }
+
+    return { height: `${profileHeight.value}px` };
+});
+
+const aiScrollThumbStyle = computed(() => ({
+    height: `${scrollThumbHeight.value}px`,
+    transform: `translateY(${scrollThumbTop.value}px)`,
+}));
+
+onMounted(() => {
+    updateAiCardSize();
+    window.addEventListener('resize', updateAiCardSize);
+
+    if (profileCard.value) {
+        profileResizeObserver = new ResizeObserver(updateAiCardSize);
+        profileResizeObserver.observe(profileCard.value);
+    }
+
+    if (aiScroll.value) {
+        aiScrollResizeObserver = new ResizeObserver(updateAiScrollThumb);
+        aiScrollResizeObserver.observe(aiScroll.value);
+        updateAiScrollThumb();
+    }
+
+    void loadAiSummary();
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('resize', updateAiCardSize);
+    profileResizeObserver?.disconnect();
+    aiScrollResizeObserver?.disconnect();
+});
+
+function updateAiCardSize() {
+    isLargeScreen.value = window.matchMedia('(min-width: 1024px)').matches;
+    profileHeight.value = profileCard.value?.offsetHeight ?? null;
+    void nextTick(updateAiScrollThumb);
+}
+
+function updateAiScrollThumb() {
+    const el = aiScroll.value;
+    const track = aiScrollTrack.value;
+
+    if (!el || !track) {
+        return;
+    }
+
+    const trackHeight = track.clientHeight;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    const minThumbHeight = 36;
+    const thumbHeight =
+        maxScroll > 0
+            ? Math.max(
+                  minThumbHeight,
+                  (el.clientHeight / el.scrollHeight) * trackHeight,
+              )
+            : trackHeight;
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+
+    scrollThumbHeight.value = thumbHeight;
+    scrollThumbTop.value =
+        maxScroll > 0 ? (el.scrollTop / maxScroll) * maxThumbTop : 0;
+}
+
+async function waitForPaint() {
+    await nextTick();
+    await new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => resolve());
+        }),
+    );
+}
+
+function sleep(ms: number) {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function typewriter(text: string, setter: (v: string) => void, speed = 4) {
+    for (let i = 0; i <= text.length; i++) {
+        setter(text.slice(0, i));
+        // Update virtual scrollbar as the text grows.
+        if (i % 24 === 0) updateAiScrollThumb();
+        await sleep(speed);
+    }
+    updateAiScrollThumb();
+}
+
+async function loadAiSummary() {
+    aiLoading.value = true;
+    aiError.value = '';
+    aiBorderAnimating.value = true;
+    aiBorderStartedAt = performance.now();
+
+    try {
+        const response = await fetch(`/children/${props.child.id}/ai-summary`, {
+            headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+            throw new Error('AI summary request failed.');
+        }
+
+        const data = await response.json();
+        const fullSummary = (data.aiSummary ?? '') as string;
+        const factors = (data.aiKeyFactors ?? []) as string[];
+        const recs = (data.recommendations ?? []) as string[];
+        aiDisclaimer.value = data.aiDisclaimer ?? '';
+
+        // Hide the loading skeleton, but keep the border spinner running while
+        // the text reveals itself. This matches the requirement literally:
+        // the spinner stays alive until every piece of text is on screen.
+        aiLoading.value = false;
+        aiSummary.value = '';
+        aiKeyFactors.value = [];
+        recommendations.value = [];
+        await waitForPaint();
+
+        await typewriter(fullSummary, (v) => (aiSummary.value = v), 4);
+
+        for (const f of factors) {
+            aiKeyFactors.value.push(f);
+            await sleep(140);
+            updateAiScrollThumb();
+        }
+        for (const r of recs) {
+            recommendations.value.push(r);
+            await sleep(140);
+            updateAiScrollThumb();
+        }
+    } catch {
+        aiError.value = 'AI summary is temporarily unavailable.';
+        aiLoading.value = false;
+    } finally {
+        await waitForPaint();
+        updateAiScrollThumb();
+
+        // Finish the current border cycle cleanly + one full extra rotation.
+        const elapsed = performance.now() - aiBorderStartedAt;
+        const finishCurrent = AI_BORDER_CYCLE_MS - (elapsed % AI_BORDER_CYCLE_MS);
+        await sleep(finishCurrent + AI_BORDER_CYCLE_MS);
+        aiBorderAnimating.value = false;
+    }
+}
 </script>
 
 <template>
@@ -239,13 +411,13 @@ const visibleEvents = computed(() => {
         class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]"
     >
         <!-- Profile card -->
-        <section class="rounded-2xl bg-white p-4 sm:p-6">
+        <section ref="profileCard" class="rounded-2xl bg-white p-4 sm:p-6">
             <RiskBadge :level="child.riskLabel" />
             <div class="mt-4 flex flex-col gap-6 sm:flex-row">
                 <img
                     :src="child.photo"
                     :alt="child.name"
-                    class="h-60 w-full shrink-0 rounded-xl object-cover sm:size-52"
+                    class="h-60 w-full shrink-0 rounded-xl object-cover sm:size-60"
                 />
                 <dl class="grid flex-1 grid-cols-2 gap-x-8 gap-y-5 text-sm">
                     <div>
@@ -285,30 +457,94 @@ const visibleEvents = computed(() => {
         </section>
 
         <!-- AI summary -->
-        <section class="ai-summary-card h-fit rounded-2xl bg-blue-50/70 p-5">
-            <Sparkles class="size-6 text-blue-500" />
-            <h2 class="mt-2 text-base font-semibold text-blue-600">
-                AI Summary
-            </h2>
-            <p class="mt-1.5 text-sm leading-relaxed text-neutral-600">
-                {{ aiSummary }}
-            </p>
-            <ul class="mt-4 space-y-2.5">
-                <li
-                    v-for="(rec, i) in recommendations"
-                    :key="i"
-                    class="flex items-start gap-3"
+        <div
+            class="ai-summary-border-shell rounded-2xl"
+            :class="{ 'is-animating': aiBorderAnimating }"
+            :style="aiCardStyle"
+        >
+            <section
+                class="ai-summary-card relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-blue-50/95 p-5"
+            >
+                <Sparkles class="size-6 shrink-0 text-blue-500" />
+                <h2 class="mt-2 shrink-0 text-base font-semibold text-blue-600">
+                    AI Summary
+                </h2>
+                <div
+                    ref="aiScroll"
+                    class="ai-summary-scroll mt-4 min-h-0 flex-1 pr-5"
+                    @scroll="updateAiScrollThumb"
+                >
+                    <p
+                        v-if="aiLoading"
+                        class="text-sm leading-relaxed text-blue-700"
+                    >
+                        Generating recommendations...
+                    </p>
+                    <div v-if="aiLoading" class="mt-4 space-y-2">
+                        <span class="block h-3 rounded-full bg-blue-100" />
+                        <span
+                            class="block h-3 w-5/6 rounded-full bg-blue-100"
+                        />
+                        <span
+                            class="block h-3 w-2/3 rounded-full bg-blue-100"
+                        />
+                    </div>
+                    <p
+                        v-else-if="aiError"
+                        class="text-sm leading-relaxed text-red-600"
+                    >
+                        {{ aiError }}
+                    </p>
+                    <template v-else>
+                        <p class="text-sm leading-relaxed text-neutral-600">
+                            {{ aiSummary }}
+                        </p>
+                        <ul v-if="aiKeyFactors.length" class="mt-4 space-y-2">
+                            <li
+                                v-for="factor in aiKeyFactors"
+                                :key="factor"
+                                class="text-sm leading-relaxed text-neutral-700"
+                            >
+                                {{ factor }}
+                            </li>
+                        </ul>
+                        <ul class="mt-4 space-y-2.5">
+                            <li
+                                v-for="(rec, i) in recommendations"
+                                :key="i"
+                                class="flex items-start gap-3"
+                            >
+                                <span
+                                    class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-blue-500 text-xs font-semibold text-white"
+                                    >{{ i + 1 }}</span
+                                >
+                                <span
+                                    class="text-sm font-medium text-neutral-800"
+                                    >{{ rec }}</span
+                                >
+                            </li>
+                        </ul>
+                        <p
+                            v-if="aiDisclaimer"
+                            class="mt-4 text-xs leading-relaxed text-neutral-500"
+                        >
+                            {{ aiDisclaimer }}
+                        </p>
+                    </template>
+                </div>
+                <span
+                    v-if="!aiLoading && !aiError"
+                    ref="aiScrollTrack"
+                    class="ai-summary-scroll-track"
+                    aria-hidden="true"
                 >
                     <span
-                        class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-blue-500 text-xs font-semibold text-white"
-                        >{{ i + 1 }}</span
-                    >
-                    <span class="text-sm font-medium text-neutral-800">{{
-                        rec
-                    }}</span>
-                </li>
-            </ul>
-        </section>
+                        class="ai-summary-scroll-thumb"
+                        :style="aiScrollThumbStyle"
+                    />
+                </span>
+            </section>
+        </div>
 
         <!-- Event history -->
         <section class="rounded-2xl bg-white p-4 sm:p-6">
@@ -316,29 +552,22 @@ const visibleEvents = computed(() => {
                 <h2 class="text-lg font-semibold text-neutral-900">
                     Event History
                 </h2>
-                <div
-                    class="inline-flex items-center gap-1 rounded-full bg-neutral-100 p-1"
-                >
-                    <button
-                        v-for="p in periods"
-                        :key="p.id"
-                        @click="period = p.id"
-                        :class="[
-                            'cursor-pointer rounded-full px-3.5 py-1 text-sm font-medium transition',
-                            period === p.id
-                                ? 'bg-neutral-900 text-white'
-                                : 'text-neutral-500 hover:text-neutral-800',
-                        ]"
-                    >
-                        {{ p.label }}
-                    </button>
-                </div>
+                <PillTabs
+                    :tabs="periods.map((p) => ({ value: p.id, label: p.label }))"
+                    :model-value="period"
+                    @update:model-value="(v) => (period = v as typeof period)"
+                />
             </div>
 
-            <ul>
+            <TransitionGroup
+                tag="ul"
+                enter-active-class="transition duration-300 ease-out"
+                enter-from-class="opacity-0 translate-y-2"
+                move-class="transition duration-300 ease-out"
+            >
                 <li
                     v-for="(ev, i) in visibleEvents"
-                    :key="i"
+                    :key="`${ev.date}-${ev.title}-${i}`"
                     class="flex gap-4"
                 >
                     <div class="flex flex-col items-center">
@@ -380,7 +609,7 @@ const visibleEvents = computed(() => {
                         </p>
                     </div>
                 </li>
-            </ul>
+            </TransitionGroup>
             <p
                 v-if="!visibleEvents.length"
                 class="py-6 text-center text-sm text-neutral-400"
@@ -471,3 +700,89 @@ const visibleEvents = computed(() => {
         </Transition>
     </Teleport>
 </template>
+
+<style scoped>
+@property --ai-border-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+.ai-summary-border-shell {
+    --ai-border-angle: 0deg;
+    position: relative;
+    overflow: hidden;
+    background: #bfdbfe;
+}
+
+.ai-summary-border-shell::before {
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+        from var(--ai-border-angle),
+        #2563eb 0deg,
+        #93c5fd 95deg,
+        #bfdbfe 180deg,
+        #60a5fa 265deg,
+        #2563eb 360deg
+    );
+    content: '';
+    opacity: 0;
+    transition: opacity 240ms ease;
+    pointer-events: none;
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+}
+
+.ai-summary-border-shell.is-animating::before {
+    animation: ai-summary-border-spin 5s linear infinite;
+    opacity: 1;
+}
+
+.ai-summary-card {
+    position: relative;
+    z-index: 1;
+}
+
+.ai-summary-scroll {
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.ai-summary-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.ai-summary-scroll-track {
+    position: absolute;
+    top: 5rem;
+    right: 0.75rem;
+    bottom: 1.25rem;
+    width: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #dbeafe;
+}
+
+.ai-summary-scroll-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border-radius: inherit;
+    background: #60a5fa;
+    transition:
+        height 160ms ease,
+        transform 80ms linear;
+}
+
+@keyframes ai-summary-border-spin {
+    to {
+        --ai-border-angle: 360deg;
+    }
+}
+</style>

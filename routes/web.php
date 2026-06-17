@@ -2,6 +2,7 @@
 
 use App\Models\Child;
 use App\Models\Event;
+use App\Services\AiSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -164,6 +165,18 @@ Route::get('/children', function (Request $request) {
     ]);
 })->name('children.index');
 
+Route::get('/children/{child}/ai-summary', function (Child $child) {
+    $events = $child->events()->orderByDesc('event_date')->orderByDesc('id')->get();
+    $aiSummary = app(AiSummaryService::class)->forChild($child, $events);
+
+    return response()->json([
+        'aiSummary' => $aiSummary['summary'],
+        'aiKeyFactors' => $aiSummary['keyFactors'],
+        'aiDisclaimer' => $aiSummary['disclaimer'],
+        'recommendations' => $aiSummary['recommendations'],
+    ]);
+})->name('children.ai-summary');
+
 Route::get('/children/{child}', function (Child $child) {
     $events = $child->events()->orderByDesc('event_date')->orderByDesc('id')->get();
 
@@ -193,10 +206,6 @@ Route::get('/children/{child}', function (Child $child) {
         $riskFactors = [['label' => 'No events', 'value' => 0, 'color' => 'bg-neutral-300']];
     }
 
-    $concerns = collect(Child::PRIORITY_FEATURES)
-        ->filter(fn ($f) => (bool) $child->{$f} && ! in_array($f, ['num_siblings'], true))
-        ->map(fn ($f) => Str::headline($f))->take(4)->implode(', ');
-
     return Inertia::render('safechild/Child', [
         'child' => [
             'id' => $child->id,
@@ -210,14 +219,6 @@ Route::get('/children/{child}', function (Child $child) {
             'guardians' => $child->guardians,
             'contact' => $child->contact,
             'address' => $child->address,
-        ],
-        'aiSummary' => 'Model priority: '.($child->predicted_priority ?? 'not scored')
-            .($concerns ? '. Active risk indicators: '.$concerns.'.' : '.')
-            .' Based on '.$events->count().' recorded events across school, medical and police sources.',
-        'recommendations' => [
-            "Assess the child's living conditions and safety",
-            'Contact the school to clarify the situation.',
-            "Evaluate the family's need for social support.",
         ],
         'eventHistory' => $history,
         'riskFactors' => $riskFactors,

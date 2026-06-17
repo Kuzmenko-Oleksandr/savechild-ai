@@ -35,4 +35,11 @@ class MlClient
         return $this->client()->post('/predict/attendance', ['items' => $items])
             ->throw()->json('items', []);
     }
+
+    /** @param array<string,mixed> $payload */
+    public function summarizeChild(array $payload): array
+    {
+        return $this->client()->post('/summarize/child', $payload)
+            ->throw()->json();
+    }
 }
