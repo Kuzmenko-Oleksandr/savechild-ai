@@ -97,7 +97,7 @@ Route::get('/mainadmin', function () {
     $checkItOut = (int) ($byStatus['check_it_out'] ?? 0);
     $inProgress = (int) ($byStatus['in_progress'] ?? 0);
     $resolved = (int) ($byStatus['resolved'] ?? 0);
-    $totalCases = $checkItOut + $inProgress + $resolved;
+    $totalCases = $all;
 
     // Case closing efficiency leaderboard (demo — would be a workers table in prod).
     $efficiency = [

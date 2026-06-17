@@ -622,7 +622,9 @@ async function loadAiSummary() {
                             class="mt-4 text-xs leading-relaxed text-neutral-500"
                         >
                             {{ aiDisclaimer }}
+
                         </p>
+                        <br/>
                     </template>
                 </div>
                 <span
