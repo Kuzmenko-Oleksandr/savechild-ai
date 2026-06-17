@@ -2,7 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\CaseNotification;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -42,6 +44,14 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            'notif' => fn () => Schema::hasTable('case_notifications')
+                ? [
+                    'unread' => CaseNotification::whereNull('read_at')->count(),
+                    'latest' => optional(
+                        CaseNotification::with('child:id,name')->whereNull('read_at')->latest()->first()
+                    )?->only(['id', 'child_id', 'title']),
+                ]
+                : ['unread' => 0, 'latest' => null],
         ];
     }
 }

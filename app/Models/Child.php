@@ -42,9 +42,34 @@ class Child extends Model
         'domestic_violence_report', 'psychological_support_recommended', 'neglect_concern_observed',
     ];
 
+    /** Case status values (separate from notification status). */
+    public const STATUSES = ['new', 'needs_attention', 'under_supervision', 'closed'];
+
     public function events(): HasMany
     {
         return $this->hasMany(Event::class);
+    }
+
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(CaseNotification::class);
+    }
+
+    /** Derive case status from notifications + risk. */
+    public function deriveStatus(): string
+    {
+        $statuses = $this->notifications->pluck('status');
+        if ($statuses->contains('in_progress')) {
+            return 'under_supervision';
+        }
+        if ($statuses->contains('check_it_out')) {
+            return 'needs_attention';
+        }
+        if ($statuses->isNotEmpty() && $statuses->every(fn ($s) => $s === 'resolved')) {
+            return 'closed';
+        }
+
+        return $this->predicted_priority === 'HIGH' ? 'needs_attention' : 'new';
     }
 
     /** Feature payload for the priority model (ints, not bools). */

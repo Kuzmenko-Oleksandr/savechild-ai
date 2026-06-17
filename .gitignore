@@ -32,3 +32,6 @@ yarn-error.log
 /bootstrap/cache/
 /storage/app/
 /storage/framework/
+# reference design assets (not part of the app)
+/design
+/New Recording.pdf

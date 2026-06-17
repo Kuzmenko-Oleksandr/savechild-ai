@@ -2,6 +2,54 @@
 
 @import 'tw-animate-css';
 
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-Thin.otf') format('opentype');
+    font-weight: 100;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-UltraLight.otf') format('opentype');
+    font-weight: 200;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-Light.otf') format('opentype');
+    font-weight: 300;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-Regular.otf') format('opentype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-Medium.otf') format('opentype');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'e-Ukraine';
+    src: url('/fonts/e-ukraine/e-Ukraine-Bold.otf') format('opentype');
+    font-weight: 600 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
@@ -9,7 +57,7 @@
 
 @theme inline {
     --font-sans:
-        Instrument Sans, ui-sans-serif, system-ui, sans-serif,
+        'e-Ukraine', 'e-ukraine', ui-sans-serif, system-ui, sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
         'Noto Color Emoji';
 
@@ -83,9 +131,70 @@
     body,
     html {
         --font-sans:
-            'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
+            'e-Ukraine', 'e-ukraine', ui-sans-serif, system-ui, sans-serif,
             'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
             'Noto Color Emoji';
+    }
+
+    .ai-summary-card {
+        --ai-summary-border-width: 2px;
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+    }
+
+    .ai-summary-card > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    .ai-summary-card::before {
+        content: '';
+        position: absolute;
+        inset: -70%;
+        z-index: 0;
+        background: conic-gradient(
+            transparent 0deg,
+            transparent 222deg,
+            rgba(255, 255, 255, 0.95) 260deg,
+            rgba(136, 166, 255, 0.92) 292deg,
+            rgba(255, 255, 255, 0.55) 318deg,
+            transparent 360deg
+        );
+        animation:
+            ai-summary-border-spin 3s linear 2,
+            ai-summary-border-fade 0.45s ease-out 6s forwards;
+        pointer-events: none;
+    }
+
+    .ai-summary-card::after {
+        content: '';
+        position: absolute;
+        inset: var(--ai-summary-border-width);
+        z-index: 0;
+        border-radius: calc(1rem - var(--ai-summary-border-width));
+        background: rgb(239 246 255);
+        pointer-events: none;
+    }
+
+    :where(
+        button,
+        [data-slot='button'],
+        a.cursor-pointer[class*='rounded']
+    ) {
+        border-radius: var(--radius-3xl, 1.5rem) !important;
+    }
+}
+
+@keyframes ai-summary-border-spin {
+    to {
+        transform: rotate(1turn);
+    }
+}
+
+@keyframes ai-summary-border-fade {
+    to {
+        opacity: 0;
     }
 }
 

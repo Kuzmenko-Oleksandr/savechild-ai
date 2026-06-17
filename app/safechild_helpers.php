@@ -129,3 +129,76 @@ if (! function_exists('sc_row')) {
         ];
     }
 }
+
+if (! function_exists('sc_notif')) {
+    function sc_notif(\App\Models\CaseNotification $n, bool $withChild = false): array
+    {
+        $legacyBodyHash = 'dbaa37f5509bb5ffd47e2536c0289a9127162fb084be4fbd64d96f992cd3a0cc';
+        $legacyNoteHash = 'fb13c966b8cddaab256b4b3684cc53639727e32c84743653e9b2cbc74e33363c';
+        $body = hash('sha256', (string) $n->body) === $legacyBodyHash
+            ? "Over the last three months, the system detected several risk factors that may indicate a decline in the child's well-being. It found unexcused school absences, a family incident that resulted in a police report, and a disciplinary note from the educational institution.\n\nThe available data shows recurring events across different areas of the child's life, which increased the risk level to High.\n\nA review of the child's living conditions is recommended, along with clarifying school attendance details and considering whether the family needs additional social support."
+            : $n->body;
+        $attachments = collect($n->attachments ?? [])->map(function ($attachment) use ($legacyNoteHash) {
+            if (hash('sha256', (string) ($attachment['note'] ?? '')) === $legacyNoteHash) {
+                $attachment['note'] = 'Information about a police visit to the residential address.';
+            }
+
+            return $attachment;
+        })->all();
+
+        $data = [
+            'id' => $n->id,
+            'childId' => $n->child_id,
+            'status' => $n->status,
+            'title' => $n->title,
+            'body' => $body,
+            'created' => $n->created_at?->diffForHumans() ?? 'now',
+            'read' => (bool) $n->read_at,
+            'attachments' => $attachments,
+            'resolvedBy' => $n->resolved_by,
+            'resolvedAt' => $n->resolved_at?->format('d M Y, H:i'),
+        ];
+        if ($withChild && $n->relationLoaded('child') && $n->child) {
+            $data['child'] = ['id' => $n->child->id, 'name' => $n->child->name, 'photo' => $n->child->photo];
+        }
+
+        return $data;
+    }
+}
+
+if (! function_exists('sc_trends_from_events')) {
+    /** Build the High-Risk trend chart from real weekly event counts. */
+    function sc_trends_from_events(): array
+    {
+        $rows = \App\Models\Event::query()
+            ->selectRaw("date_trunc('week', event_date) as wk, count(*) c")
+            ->whereNotNull('event_date')
+            ->groupByRaw("date_trunc('week', event_date)")
+            ->orderByRaw("date_trunc('week', event_date)")
+            ->get();
+
+        $weeks = $rows->map(fn ($r) => [
+            'date' => \Illuminate\Support\Carbon::parse($r->wk),
+            'c' => (int) $r->c,
+        ])->values()->all();
+
+        $build = function (string $id, array $slice) {
+            if (! $slice) {
+                return ['id' => $id, 'range' => '—', 'labels' => [], 'points' => [0]];
+            }
+            $n = count($slice);
+            $points = array_map(fn ($w) => $w['c'], $slice);
+            $idx = array_values(array_unique([0, (int) ($n * 0.25), (int) ($n * 0.5), (int) ($n * 0.75), $n - 1]));
+            $labels = array_map(fn ($i) => $slice[$i]['date']->format('d.m'), $idx);
+            $range = $slice[0]['date']->format('d M').' - '.$slice[$n - 1]['date']->format('d M');
+
+            return ['id' => $id, 'range' => $range, 'labels' => $labels, 'points' => $points];
+        };
+
+        return [
+            $build('30d', array_slice($weeks, -5)),
+            $build('90d', array_slice($weeks, -13)),
+            $build('all', $weeks),
+        ];
+    }
+}

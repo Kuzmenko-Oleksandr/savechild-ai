@@ -2,7 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { onClickOutside } from '@vueuse/core';
-import { AlertTriangle, Calendar, Check, ChevronRight, Info, OctagonAlert, RefreshCw, Users } from '@lucide/vue';
+import { AlertTriangle, Calendar, Check, ChevronRight, Info, OctagonAlert, RefreshCw, Search, Users } from '@lucide/vue';
 import ChildrenTable, { type ChildRow } from '@/components/safechild/ChildrenTable.vue';
 
 interface Stat {
@@ -31,6 +31,13 @@ const cardStyles: Record<string, { card: string; icon: string; label: string }> 
     high: { card: 'bg-red-50', icon: 'bg-red-500 text-white', label: 'text-red-500' },
 };
 const cardIcon: Record<string, unknown> = { all: Users, low: Info, medium: AlertTriangle, high: OctagonAlert };
+
+// ---- High-risk card search (client-side over the shown rows) ----
+const search = ref('');
+const filteredChildren = computed(() => {
+    const q = search.value.trim().toLowerCase();
+    return q ? props.children.filter((c) => c.name.toLowerCase().includes(q) || c.school.toLowerCase().includes(q)) : props.children;
+});
 
 // ---- Trend range selection ----
 const selectedId = ref(props.trends[0]?.id);
@@ -82,7 +89,7 @@ const yPos = (v: number) => PAD_T + innerH * (1 - v / maxY);
                 <component :is="cardIcon[s.key]" class="size-5" />
             </span>
             <p :class="['mt-5 text-sm font-medium leading-tight', cardStyles[s.key].label]">{{ s.label }}</p>
-            <div class="mt-2 flex items-center gap-3">
+            <div class="mt-2 flex items-end justify-between gap-3">
                 <span class="text-3xl font-bold text-neutral-900">{{ s.value }}</span>
                 <span
                     v-if="s.delta"
@@ -96,13 +103,22 @@ const yPos = (v: number) => PAD_T + innerH * (1 - v / maxY);
 
     <!-- Children at high risk -->
     <section class="mt-6 rounded-2xl bg-white p-4 sm:p-6">
-        <div class="mb-2 flex items-center justify-between">
+        <div class="mb-6 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-neutral-900">Children at High Risk</h2>
             <Link href="/children" class="inline-flex cursor-pointer items-center gap-1 rounded-full border border-neutral-200 px-3.5 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50">
                 See all <ChevronRight class="size-4" />
             </Link>
         </div>
-        <ChildrenTable :rows="children" />
+<!--        <div class="relative mb-4">-->
+<!--            <Search class="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />-->
+<!--            <input-->
+<!--                v-model="search"-->
+<!--                type="text"-->
+<!--                placeholder="Search child"-->
+<!--                class="h-11 w-full rounded-full border border-neutral-200 bg-neutral-50/60 pl-11 pr-4 text-sm text-neutral-700 placeholder:text-neutral-400 focus:border-neutral-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-neutral-100"-->
+<!--            />-->
+<!--        </div>-->
+        <ChildrenTable :rows="filteredChildren" />
     </section>
 
     <!-- Today + Trend -->
@@ -174,8 +190,8 @@ const yPos = (v: number) => PAD_T + innerH * (1 - v / maxY);
                         class="fill-neutral-300 text-[10px]"
                     >{{ v.toLocaleString() }}</text>
                 </g>
-                <path :d="areaPath" fill="url(#trendFill)" />
-                <path :d="linePath" fill="none" stroke="rgb(239 68 68)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+                <path :key="'area-' + selected.id" :d="areaPath" fill="url(#trendFill)" class="trend-area" />
+                <path :key="'line-' + selected.id" :d="linePath" fill="none" stroke="rgb(239 68 68)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" pathLength="1" class="trend-line" />
                 <text
                     v-for="(lbl, i) in selected.labels" :key="lbl"
                     :x="PAD_L + (innerW * i) / (selected.labels.length - 1)" :y="H - 6" text-anchor="middle"
@@ -185,3 +201,22 @@ const yPos = (v: number) => PAD_T + innerH * (1 - v / maxY);
         </section>
     </div>
 </template>
+
+<style scoped>
+/* Line "draws" itself in on load and whenever the range changes (path is re-keyed). */
+.trend-line {
+    stroke-dasharray: 1;
+    animation: trend-draw 1s ease forwards;
+}
+@keyframes trend-draw {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
+}
+.trend-area {
+    animation: trend-fade 1.1s ease forwards;
+}
+@keyframes trend-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+</style>

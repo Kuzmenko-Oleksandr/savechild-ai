@@ -1,10 +1,33 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
-import { ChevronRight, GraduationCap, HeartHandshake, Shield, Sparkles } from '@lucide/vue';
+import {
+    ChevronDown,
+    ChevronRight,
+    ChevronUp,
+    Eye,
+    FileText,
+    GraduationCap,
+    HeartHandshake,
+    OctagonAlert,
+    Shield,
+    Sparkles,
+} from '@lucide/vue';
 import RiskBadge from '@/components/safechild/RiskBadge.vue';
 
-interface RiskFactor { label: string; value: number; color: string }
+interface RiskFactor {
+    label: string;
+    value: number;
+    color: string;
+}
+interface NotifItem {
+    id: number;
+    status: 'check_it_out' | 'in_progress' | 'resolved';
+    title: string;
+    body: string;
+    created: string;
+    attachments: { name: string; note: string }[];
+}
 interface EventItem {
     date: string;
     time: string;
@@ -32,9 +55,39 @@ const props = defineProps<{
     recommendations: string[];
     eventHistory: EventItem[];
     riskFactors: RiskFactor[];
+    notifications: NotifItem[];
 }>();
 
-const categoryIcon = { Incident: Shield, Education: GraduationCap, Social: HeartHandshake };
+const badge: Record<string, { cls: string; label: string }> = {
+    check_it_out: { cls: 'bg-red-500 text-white', label: 'CHECK IT OUT' },
+    in_progress: { cls: 'bg-sky-500 text-white', label: 'IN PROCESS' },
+    resolved: { cls: 'bg-emerald-500 text-white', label: 'RESOLVED' },
+};
+
+const expanded = ref<number | null>(null); // initial state: collapsed
+const confirmTarget = ref<NotifItem | null>(null);
+
+function toggle(id: number) {
+    expanded.value = expanded.value === id ? null : id;
+}
+function take(n: NotifItem) {
+    router.post(`/notifications/${n.id}/take`, {}, { preserveScroll: true });
+}
+function resolve() {
+    if (!confirmTarget.value) return;
+    router.post(
+        `/notifications/${confirmTarget.value.id}/resolve`,
+        {},
+        { preserveScroll: true },
+    );
+    confirmTarget.value = null;
+}
+
+const categoryIcon = {
+    Incident: Shield,
+    Education: GraduationCap,
+    Social: HeartHandshake,
+};
 
 const periods = [
     { id: '6', label: '6 mo.', max: 6 },
@@ -53,17 +106,138 @@ const visibleEvents = computed(() => {
     <Head :title="child.name" />
 
     <div class="flex flex-wrap items-start justify-between gap-3">
-        <h1 class="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">{{ child.name }}</h1>
-        <nav class="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-400 sm:mt-3">
-            <Link href="/" class="cursor-pointer hover:text-neutral-600">Home</Link>
+        <h1
+            class="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl"
+        >
+            {{ child.name }}
+        </h1>
+        <nav
+            class="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-400 sm:mt-3"
+        >
+            <Link href="/" class="cursor-pointer hover:text-neutral-600"
+                >Home</Link
+            >
             <ChevronRight class="size-4" />
-            <Link href="/children" class="cursor-pointer hover:text-neutral-600">Children</Link>
+            <Link href="/children" class="cursor-pointer hover:text-neutral-600"
+                >Children</Link
+            >
             <ChevronRight class="size-4" />
             <span class="font-medium text-neutral-900">{{ child.name }}</span>
         </nav>
     </div>
 
-    <div class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+    <!-- Tasks & notifications -->
+    <section v-if="notifications.length" class="mt-8">
+        <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-neutral-900">
+                Tasks &amp; notifications
+            </h2>
+            <Link
+                href="/notifications"
+                class="inline-flex cursor-pointer items-center gap-1 rounded-full border border-neutral-200 bg-white px-3.5 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50"
+            >
+                See all <ChevronRight class="size-4" />
+            </Link>
+        </div>
+
+        <article
+            v-for="n in notifications"
+            :key="n.id"
+            class="mb-4 rounded-2xl bg-white p-5"
+        >
+            <div class="flex items-start justify-between">
+                <span
+                    :class="[
+                        'rounded-full px-2.5 py-1 text-xs font-semibold',
+                        badge[n.status].cls,
+                    ]"
+                    >{{ badge[n.status].label }}</span
+                >
+                <button
+                    @click="toggle(n.id)"
+                    class="flex cursor-pointer items-center gap-2 text-xs text-neutral-400 hover:text-neutral-700"
+                >
+                    {{ n.created }}
+                    <component
+                        :is="expanded === n.id ? ChevronUp : ChevronDown"
+                        class="size-4"
+                    />
+                </button>
+            </div>
+            <h3 class="mt-3 font-semibold text-neutral-900">{{ n.title }}</h3>
+
+            <div
+                class="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+                :class="
+                    expanded === n.id
+                        ? 'grid-rows-[1fr] opacity-100'
+                        : 'pointer-events-none grid-rows-[0fr] opacity-0'
+                "
+                :aria-hidden="expanded !== n.id"
+                :inert="expanded !== n.id"
+            >
+                <div class="min-h-0 overflow-hidden">
+                    <p
+                        class="mt-2 text-sm leading-relaxed whitespace-pre-line text-neutral-500"
+                    >
+                        {{ n.body }}
+                    </p>
+                    <ul v-if="n.attachments.length" class="mt-4">
+                        <li
+                            v-for="(a, i) in n.attachments"
+                            :key="i"
+                            class="flex items-center gap-3 border-b border-neutral-100 py-3 first:pt-0 last:border-b-0 last:pb-0"
+                        >
+                            <FileText
+                                class="size-5 shrink-0 text-neutral-400"
+                            />
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-neutral-900">
+                                    {{ a.name }}
+                                </p>
+                                <p class="text-xs text-neutral-400">
+                                    {{ a.note }}
+                                </p>
+                            </div>
+                            <button
+                                class="cursor-pointer text-neutral-400 transition hover:text-neutral-700"
+                                title="Preview"
+                                aria-label="Preview document"
+                            >
+                                <Eye class="size-5" />
+                            </button>
+                        </li>
+                    </ul>
+                    <div class="mt-4">
+                        <button
+                            v-if="n.status === 'check_it_out'"
+                            @click="take(n)"
+                            class="cursor-pointer rounded-3xl bg-[#0C111D] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#111827]"
+                        >
+                            Take to work
+                        </button>
+                        <button
+                            v-else-if="n.status === 'in_progress'"
+                            @click="confirmTarget = n"
+                            class="cursor-pointer rounded-3xl bg-[#0C111D] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#111827]"
+                        >
+                            Mark as resolved
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <p
+                v-if="expanded !== n.id"
+                class="mt-1 line-clamp-1 text-sm text-neutral-500"
+            >
+                {{ n.body }}
+            </p>
+        </article>
+    </section>
+
+    <div
+        class="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]"
+    >
         <!-- Profile card -->
         <section class="rounded-2xl bg-white p-4 sm:p-6">
             <RiskBadge :level="child.riskLabel" />
@@ -74,26 +248,64 @@ const visibleEvents = computed(() => {
                     class="h-60 w-full shrink-0 rounded-xl object-cover sm:size-52"
                 />
                 <dl class="grid flex-1 grid-cols-2 gap-x-8 gap-y-5 text-sm">
-                    <div><dt class="font-semibold text-neutral-900">Age:</dt><dd class="text-neutral-500">{{ child.age }}</dd></div>
-                    <div><dt class="font-semibold text-neutral-900">Sex:</dt><dd class="text-neutral-500">{{ child.sex }}</dd></div>
-                    <div><dt class="font-semibold text-neutral-900">School:</dt><dd class="text-neutral-500">{{ child.school }}</dd></div>
-                    <div><dt class="font-semibold text-neutral-900">Grade:</dt><dd class="text-neutral-500">{{ child.grade }}</dd></div>
-                    <div><dt class="font-semibold text-neutral-900">Parent / Guardian:</dt><dd class="text-neutral-500">{{ child.guardians }}</dd></div>
-                    <div><dt class="font-semibold text-neutral-900">Contact Number:</dt><dd class="text-neutral-500">{{ child.contact }}</dd></div>
-                    <div class="col-span-2"><dt class="font-semibold text-neutral-900">Address:</dt><dd class="text-neutral-500">{{ child.address }}</dd></div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">Age:</dt>
+                        <dd class="text-neutral-500">{{ child.age }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">Sex:</dt>
+                        <dd class="text-neutral-500">{{ child.sex }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">School:</dt>
+                        <dd class="text-neutral-500">{{ child.school }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">Grade:</dt>
+                        <dd class="text-neutral-500">{{ child.grade }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">
+                            Parent / Guardian:
+                        </dt>
+                        <dd class="text-neutral-500">{{ child.guardians }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-neutral-900">
+                            Contact Number:
+                        </dt>
+                        <dd class="text-neutral-500">{{ child.contact }}</dd>
+                    </div>
+                    <div class="col-span-2">
+                        <dt class="font-semibold text-neutral-900">Address:</dt>
+                        <dd class="text-neutral-500">{{ child.address }}</dd>
+                    </div>
                 </dl>
             </div>
         </section>
 
         <!-- AI summary -->
-        <section class="h-fit rounded-2xl bg-blue-50/70 p-5">
+        <section class="ai-summary-card h-fit rounded-2xl bg-blue-50/70 p-5">
             <Sparkles class="size-6 text-blue-500" />
-            <h2 class="mt-2 text-base font-semibold text-blue-600">AI Summary</h2>
-            <p class="mt-1.5 text-sm leading-relaxed text-neutral-600">{{ aiSummary }}</p>
+            <h2 class="mt-2 text-base font-semibold text-blue-600">
+                AI Summary
+            </h2>
+            <p class="mt-1.5 text-sm leading-relaxed text-neutral-600">
+                {{ aiSummary }}
+            </p>
             <ul class="mt-4 space-y-2.5">
-                <li v-for="(rec, i) in recommendations" :key="i" class="flex items-start gap-3">
-                    <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-blue-500 text-xs font-semibold text-white">{{ i + 1 }}</span>
-                    <span class="text-sm font-medium text-neutral-800">{{ rec }}</span>
+                <li
+                    v-for="(rec, i) in recommendations"
+                    :key="i"
+                    class="flex items-start gap-3"
+                >
+                    <span
+                        class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-blue-500 text-xs font-semibold text-white"
+                        >{{ i + 1 }}</span
+                    >
+                    <span class="text-sm font-medium text-neutral-800">{{
+                        rec
+                    }}</span>
                 </li>
             </ul>
         </section>
@@ -101,53 +313,161 @@ const visibleEvents = computed(() => {
         <!-- Event history -->
         <section class="rounded-2xl bg-white p-4 sm:p-6">
             <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <h2 class="text-lg font-semibold text-neutral-900">Event History</h2>
-                <div class="inline-flex items-center gap-1 rounded-full bg-neutral-100 p-1">
+                <h2 class="text-lg font-semibold text-neutral-900">
+                    Event History
+                </h2>
+                <div
+                    class="inline-flex items-center gap-1 rounded-full bg-neutral-100 p-1"
+                >
                     <button
-                        v-for="p in periods" :key="p.id"
+                        v-for="p in periods"
+                        :key="p.id"
                         @click="period = p.id"
-                        :class="['cursor-pointer rounded-full px-3.5 py-1 text-sm font-medium transition', period === p.id ? 'bg-neutral-900 text-white' : 'text-neutral-500 hover:text-neutral-800']"
-                    >{{ p.label }}</button>
+                        :class="[
+                            'cursor-pointer rounded-full px-3.5 py-1 text-sm font-medium transition',
+                            period === p.id
+                                ? 'bg-neutral-900 text-white'
+                                : 'text-neutral-500 hover:text-neutral-800',
+                        ]"
+                    >
+                        {{ p.label }}
+                    </button>
                 </div>
             </div>
 
             <ul>
-                <li v-for="(ev, i) in visibleEvents" :key="i" class="flex gap-4">
+                <li
+                    v-for="(ev, i) in visibleEvents"
+                    :key="i"
+                    class="flex gap-4"
+                >
                     <div class="flex flex-col items-center">
-                        <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-500">
-                            <component :is="categoryIcon[ev.category]" class="size-4" />
+                        <span
+                            class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-500"
+                        >
+                            <component
+                                :is="categoryIcon[ev.category]"
+                                class="size-4"
+                            />
                         </span>
-                        <span v-if="i < visibleEvents.length - 1" class="my-1 w-px flex-1 bg-neutral-200" />
+                        <span
+                            v-if="i < visibleEvents.length - 1"
+                            class="my-1 w-px flex-1 bg-neutral-200"
+                        />
                     </div>
                     <div class="flex-1 pb-6">
-                        <div class="text-sm font-semibold text-neutral-900">{{ ev.date }}</div>
-                        <div class="text-xs text-neutral-400">{{ ev.time }}</div>
-                        <div class="mt-2 flex items-start justify-between gap-3">
-                            <p class="font-semibold text-neutral-900">{{ ev.title }}</p>
-                            <span class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-500">{{ ev.category }}</span>
+                        <div class="text-sm font-semibold text-neutral-900">
+                            {{ ev.date }}
                         </div>
-                        <p class="mt-1 text-sm leading-relaxed text-neutral-500">{{ ev.description }}</p>
+                        <div class="text-xs text-neutral-400">
+                            {{ ev.time }}
+                        </div>
+                        <div
+                            class="mt-2 flex items-start justify-between gap-3"
+                        >
+                            <p class="font-semibold text-neutral-900">
+                                {{ ev.title }}
+                            </p>
+                            <span
+                                class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-500"
+                                >{{ ev.category }}</span
+                            >
+                        </div>
+                        <p
+                            class="mt-1 text-sm leading-relaxed text-neutral-500"
+                        >
+                            {{ ev.description }}
+                        </p>
                     </div>
                 </li>
             </ul>
-            <p v-if="!visibleEvents.length" class="py-6 text-center text-sm text-neutral-400">No events in this period.</p>
+            <p
+                v-if="!visibleEvents.length"
+                class="py-6 text-center text-sm text-neutral-400"
+            >
+                No events in this period.
+            </p>
         </section>
 
         <!-- Top risk factors -->
         <section class="h-fit rounded-2xl bg-white p-4 sm:p-6">
-            <h2 class="text-lg font-semibold text-neutral-900">Top Risk Factors</h2>
-            <p class="text-sm text-neutral-400">Number of customer based on country</p>
+            <h2 class="text-lg font-semibold text-neutral-900">
+                Top Risk Factors
+            </h2>
+            <p class="text-sm text-neutral-400">
+                Number of customer based on country
+            </p>
             <ul class="mt-6 space-y-5">
                 <li v-for="(f, i) in riskFactors" :key="i">
-                    <p class="mb-2 text-sm font-semibold text-neutral-900">{{ f.label }}</p>
+                    <p class="mb-2 text-sm font-semibold text-neutral-900">
+                        {{ f.label }}
+                    </p>
                     <div class="flex items-center gap-3">
-                        <div class="h-2 flex-1 overflow-hidden rounded-full bg-neutral-100">
-                            <div class="h-full rounded-full" :class="f.color" :style="{ width: `${f.value}%` }" />
+                        <div
+                            class="h-2 flex-1 overflow-hidden rounded-full bg-neutral-100"
+                        >
+                            <div
+                                class="h-full rounded-full"
+                                :class="f.color"
+                                :style="{ width: `${f.value}%` }"
+                            />
                         </div>
-                        <span class="w-10 shrink-0 text-right text-sm font-semibold text-neutral-900">{{ f.value }}%</span>
+                        <span
+                            class="w-10 shrink-0 text-right text-sm font-semibold text-neutral-900"
+                            >{{ f.value }}%</span
+                        >
                     </div>
                 </li>
             </ul>
         </section>
     </div>
+
+    <!-- Resolve confirmation modal -->
+    <Teleport to="body">
+        <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0"
+            leave-active-class="transition duration-150 ease-in"
+            leave-to-class="opacity-0"
+        >
+            <div
+                v-if="confirmTarget"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                @click.self="confirmTarget = null"
+            >
+                <div
+                    class="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-xl transition duration-200"
+                    :class="confirmTarget ? 'scale-100' : 'scale-95'"
+                >
+                    <span
+                        class="mx-auto flex size-14 items-center justify-center rounded-2xl bg-neutral-900 text-white"
+                    >
+                        <OctagonAlert class="size-6" />
+                    </span>
+                    <h3 class="mt-5 text-xl font-bold text-neutral-900">
+                        Confirm task completion?
+                    </h3>
+                    <p class="mt-2 text-sm leading-relaxed text-neutral-500">
+                        After confirmation the task moves to the completed list,
+                        and the date and responsible worker are saved in the
+                        case history.
+                    </p>
+                    <div class="mt-6 flex items-center justify-center gap-3">
+                        <button
+                            @click="resolve"
+                            class="cursor-pointer rounded-xl bg-neutral-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
+                        >
+                            Mark as resolved
+                        </button>
+                        <button
+                            @click="confirmTarget = null"
+                            class="cursor-pointer rounded-xl border border-neutral-200 px-6 py-3 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50"
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Transition>
+    </Teleport>
 </template>

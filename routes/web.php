@@ -11,29 +11,54 @@ Route::get('/', function () {
     $byPriority = Child::query()
         ->selectRaw('predicted_priority, count(*) c')
         ->groupBy('predicted_priority')->pluck('c', 'predicted_priority');
+    $low = (int) ($byPriority['LOW'] ?? 0);
+    $medium = (int) ($byPriority['MEDIUM'] ?? 0);
+    $high = (int) ($byPriority['HIGH'] ?? 0);
+    $all = Child::count();
 
     $fmt = fn (int $n) => number_format($n, 0, '.', ' ');
 
+    // Dynamic deltas from the two most recent risk snapshots.
+    $snaps = DB::table('risk_snapshots')->orderByDesc('captured_on')->limit(2)->get();
+    $cur = $snaps[0] ?? null;
+    $prev = $snaps[1] ?? null;
+    $delta = function (string $key) use ($cur, $prev) {
+        if (! $cur || ! $prev || ($prev->$key ?? 0) == 0) {
+            return [null, 'up'];
+        }
+        $pct = (($cur->$key - $prev->$key) / $prev->$key) * 100;
+
+        return [number_format(abs($pct), 2).'%', $pct >= 0 ? 'up' : 'down'];
+    };
+    [$dl, $tl] = $delta('low');
+    [$dm, $tm] = $delta('medium');
+    [$dh, $th] = $delta('high');
+
     $highChildren = Child::query()->where('predicted_priority', 'HIGH')->orderByDesc('probability_high')->take(5)->get();
     $latest = sc_latest_events($highChildren->pluck('id')->all());
+
+    // Dynamic "Today" figures.
+    $eventsRecent = Event::where('event_date', '>=', now()->subDays(30))->count();
+    $underSupervision = Child::where('status', 'under_supervision')->count();
+    $resolvedToday = \App\Models\CaseNotification::where('status', 'resolved')->whereDate('resolved_at', now()->toDateString())->count();
 
     return Inertia::render('safechild/Dashboard', [
         'district' => 'Shevchenkivskyi district',
         'asOf' => now()->format('d M Y, H:i'),
         'stats' => [
-            ['key' => 'all', 'label' => 'All children', 'value' => $fmt(Child::count())],
-            ['key' => 'low', 'label' => 'Low Risk', 'value' => $fmt((int) ($byPriority['LOW'] ?? 0)), 'delta' => '9.05%', 'trend' => 'up'],
-            ['key' => 'medium', 'label' => 'Medium Risk', 'value' => $fmt((int) ($byPriority['MEDIUM'] ?? 0)), 'delta' => '9.05%', 'trend' => 'down'],
-            ['key' => 'high', 'label' => 'High Risk', 'value' => $fmt((int) ($byPriority['HIGH'] ?? 0)), 'delta' => '9.05%', 'trend' => 'down'],
+            ['key' => 'all', 'label' => 'All children', 'value' => $fmt($all)],
+            ['key' => 'low', 'label' => 'Low Risk', 'value' => $fmt($low), 'delta' => $dl, 'trend' => $tl],
+            ['key' => 'medium', 'label' => 'Medium Risk', 'value' => $fmt($medium), 'delta' => $dm, 'trend' => $tm],
+            ['key' => 'high', 'label' => 'High Risk', 'value' => $fmt($high), 'delta' => $dh, 'trend' => $th],
         ],
         'children' => $highChildren->map(fn ($c) => sc_row($c, $latest[$c->id] ?? null))->all(),
         'today' => [
-            ['title' => '14 children moved', 'description' => 'children escalated to high risk'],
-            ['title' => '27 new incidents', 'description' => 'were recorded in the system'],
-            ['title' => '3 communities', 'description' => 'show a significant increase in risk levels'],
-            ['title' => '3 communities', 'description' => 'cases require cross-agency coordination'],
+            ['title' => $fmt($high).' children at high risk', 'description' => 'flagged by the priority model'],
+            ['title' => $fmt($eventsRecent).' new incidents', 'description' => 'recorded in the last 30 days'],
+            ['title' => $fmt($underSupervision).' cases under supervision', 'description' => 'currently in progress'],
+            ['title' => $fmt($resolvedToday).' cases resolved', 'description' => 'marked done today'],
         ],
-        'trends' => safechild_trends(),
+        'trends' => sc_trends_from_events(),
     ]);
 })->name('home');
 
@@ -50,13 +75,21 @@ Route::get('/children', function (Request $request) {
     $sources = array_values(array_intersect((array) $request->input('event', []), ['school', 'medical', 'police']));
     $ageBuckets = array_values((array) $request->input('age', []));
     $period = (int) $request->integer('period');
+    $statuses = array_values(array_intersect((array) $request->input('status', []), Child::STATUSES));
+    $sort = $request->string('sort')->toString();
+    $dir = $request->string('dir')->toString() === 'desc' ? 'desc' : 'asc';
 
     $ageRanges = ['0-5' => [0, 5], '6-10' => [6, 10], '11-14' => [11, 14], '15-17' => [15, 17]];
 
     $query = Child::query()
+        ->addSelect('children.*')
+        ->addSelect(['last_event_date' => Event::select('event_date')
+            ->whereColumn('events.child_id', 'children.id')
+            ->orderByDesc('event_date')->orderByDesc('id')->limit(1)])
         ->when(in_array($level, ['HIGH', 'MEDIUM', 'LOW'], true), fn ($x) => $x->where('predicted_priority', $level))
         ->when($school !== '', fn ($x) => $x->where('school', $school))
         ->when(! empty($sex), fn ($x) => $x->whereIn('sex', $sex))
+        ->when(! empty($statuses), fn ($x) => $x->whereIn('status', $statuses))
         ->when(! empty($ageBuckets), function ($x) use ($ageBuckets, $ageRanges) {
             $x->where(function ($w) use ($ageBuckets, $ageRanges) {
                 foreach ($ageBuckets as $b) {
@@ -68,9 +101,23 @@ Route::get('/children', function (Request $request) {
         })
         ->when(! empty($sources), fn ($x) => $x->whereHas('events', fn ($e) => $e->whereIn('event_source', $sources)))
         ->when($period > 0, fn ($x) => $x->whereHas('events', fn ($e) => $e->where('event_date', '>=', now()->subDays($period))))
-        ->when($q !== '', fn ($x) => $x->where(fn ($w) => $w->where('name', 'ilike', "%$q%")->orWhere('school', 'ilike', "%$q%")))
-        ->orderByRaw("array_position(ARRAY['HIGH','MEDIUM','LOW']::text[], predicted_priority)")
-        ->orderBy('id');
+        ->when($q !== '', fn ($x) => $x->where(fn ($w) => $w->where('name', 'ilike', "%$q%")->orWhere('school', 'ilike', "%$q%")));
+
+    // Sorting (all columns). Unspecified => risk priority then id.
+    $sortMap = [
+        'child' => 'name',
+        'age' => 'age',
+        'school' => 'school',
+        'status' => 'status',
+        'risk' => "array_position(ARRAY['HIGH','MEDIUM','LOW']::text[], predicted_priority)",
+        'event' => 'last_event_date',
+        'updated' => 'last_event_date',
+    ];
+    if (isset($sortMap[$sort])) {
+        $query->orderByRaw($sortMap[$sort].' '.$dir.' nulls last');
+    } else {
+        $query->orderByRaw("array_position(ARRAY['HIGH','MEDIUM','LOW']::text[], predicted_priority)")->orderBy('id');
+    }
 
     $page = $query->paginate($perPage)->withQueryString();
     $latest = sc_latest_events($page->getCollection()->pluck('id')->all());
@@ -94,7 +141,9 @@ Route::get('/children', function (Request $request) {
             'event' => $sources,
             'age' => $ageBuckets,
             'period' => $period ?: null,
+            'status' => $statuses,
         ],
+        'sort' => ['by' => $sort ?: null, 'dir' => $dir],
         'filterOptions' => [
             'schools' => Child::query()->select('school')->distinct()->orderBy('school')->pluck('school')->all(),
             'events' => [
@@ -105,6 +154,12 @@ Route::get('/children', function (Request $request) {
             'sexes' => [['value' => 'Male', 'label' => 'Boys'], ['value' => 'Female', 'label' => 'Girls']],
             'ages' => ['0-5', '6-10', '11-14', '15-17'],
             'periods' => [['value' => 30, 'label' => 'Last 30 days'], ['value' => 180, 'label' => 'Last 6 months'], ['value' => 365, 'label' => 'Last 12 months']],
+            'statuses' => [
+                ['value' => 'new', 'label' => 'New cases'],
+                ['value' => 'needs_attention', 'label' => 'Needs attention'],
+                ['value' => 'under_supervision', 'label' => 'Under supervision'],
+                ['value' => 'closed', 'label' => 'Closed'],
+            ],
         ],
     ]);
 })->name('children.index');
@@ -166,8 +221,54 @@ Route::get('/children/{child}', function (Child $child) {
         ],
         'eventHistory' => $history,
         'riskFactors' => $riskFactors,
+        'notifications' => $child->notifications()->latest()->get()->map(fn ($n) => sc_notif($n))->all(),
     ]);
 })->name('children.show');
+
+Route::get('/notifications', function (Request $request) {
+    $status = $request->string('status')->toString();
+    $tabMap = ['check_it_out' => 'check_it_out', 'in_progress' => 'in_progress', 'done' => 'resolved'];
+
+    $page = \App\Models\CaseNotification::query()
+        ->with('child:id,name,photo')
+        ->when(isset($tabMap[$status]), fn ($x) => $x->where('status', $tabMap[$status]))
+        ->latest()
+        ->paginate(8)
+        ->withQueryString();
+
+    return Inertia::render('safechild/Notifications', [
+        'items' => $page->getCollection()->map(fn ($n) => sc_notif($n, true))->all(),
+        'pagination' => [
+            'current_page' => $page->currentPage(),
+            'last_page' => $page->lastPage(),
+            'per_page' => $page->perPage(),
+            'per_page_options' => [8],
+            'total' => $page->total(),
+            'from' => $page->firstItem() ?? 0,
+            'to' => $page->lastItem() ?? 0,
+        ],
+        'tab' => $status ?: 'all',
+    ]);
+})->name('notifications.index');
+
+Route::post('/notifications/{notification}/take', function (\App\Models\CaseNotification $notification) {
+    $notification->update(['status' => 'in_progress', 'read_at' => $notification->read_at ?? now()]);
+    $notification->child->update(['status' => $notification->child->fresh()->load('notifications')->deriveStatus()]);
+
+    return back();
+})->name('notifications.take');
+
+Route::post('/notifications/{notification}/resolve', function (\App\Models\CaseNotification $notification) {
+    $notification->update([
+        'status' => 'resolved',
+        'resolved_by' => 'Olena Franko',
+        'resolved_at' => now(),
+        'read_at' => $notification->read_at ?? now(),
+    ]);
+    $notification->child->update(['status' => $notification->child->fresh()->load('notifications')->deriveStatus()]);
+
+    return back();
+})->name('notifications.resolve');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('dashboard', 'Dashboard')->name('dashboard');

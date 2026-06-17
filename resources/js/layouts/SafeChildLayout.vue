@@ -1,42 +1,52 @@
 <script setup lang="ts">
-import { Link, router } from '@inertiajs/vue3';
-import { Bell, ChevronDown, Search } from '@lucide/vue';
+import { Link, router, usePage } from '@inertiajs/vue3';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { Bell, ChevronDown, ChevronRight, X } from '@lucide/vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { searchQuery } from '@/composables/useSearch';
+import { filterPanelOpen } from '@/composables/usePanel';
 
-function submitSearch() {
-    // Jump to the children list where the query is applied.
-    if (window.location.pathname !== '/children') {
-        router.visit('/children');
+const page = usePage();
+const notif = computed<any>(() => (page.props as any).notif ?? { unread: 0, latest: null });
+const unread = computed<number>(() => notif.value.unread ?? 0);
+
+// Toast for the newest unread notification.
+const toast = ref<any>(notif.value.latest);
+let seenId: number | null = notif.value.latest?.id ?? null;
+
+watch(() => notif.value.latest?.id, (id) => {
+    if (id && id !== seenId) {
+        toast.value = notif.value.latest;
+        seenId = id;
     }
-}
+});
+
+// Polling: quietly refresh the shared `notif` prop (near real-time).
+let timer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+    timer = setInterval(() => router.reload({ only: ['notif'] }), 12000);
+});
+onUnmounted(() => clearInterval(timer));
 </script>
 
 <template>
     <div class="min-h-screen bg-[#eef1f1] text-neutral-900">
-        <!-- Top navigation -->
-        <header class="sticky top-0 z-30 border-b border-neutral-200/70 bg-[#eef1f1]/90 backdrop-blur">
-            <div class="mx-auto flex h-[72px] max-w-[1320px] items-center gap-3 px-4 sm:gap-6 sm:px-6">
+        <header
+            class="sticky top-0 z-30 bg-white shadow-sm transition-[border-radius] duration-200"
+            :class="filterPanelOpen ? 'rounded-b-none' : 'rounded-b-3xl'"
+        >
+            <div class="flex h-[72px] items-center justify-between gap-3 px-6 sm:px-10">
                 <Link href="/" class="flex shrink-0 cursor-pointer items-center">
                     <img src="/img/logo.png" alt="SafeChild" class="h-7 w-auto" />
                 </Link>
 
-                <form class="relative mx-auto w-full max-w-2xl" @submit.prevent="submitSearch">
-                    <Search class="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
-                    <input
-                        v-model="searchQuery"
-                        type="text"
-                        placeholder="Search child"
-                        class="h-11 w-full rounded-full border border-neutral-200 bg-white pl-11 pr-16 text-sm text-neutral-700 placeholder:text-neutral-400 focus:border-neutral-300 focus:outline-none focus:ring-4 focus:ring-neutral-100"
-                    />
-                    <kbd class="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 text-[11px] font-medium text-neutral-400 sm:block">⌘K</kbd>
-                </form>
-
                 <div class="flex shrink-0 items-center gap-3 sm:gap-4">
-                    <button class="relative flex size-10 cursor-pointer items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-50">
+                    <Link
+                        href="/notifications"
+                        class="relative flex size-10 cursor-pointer items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition hover:bg-neutral-50"
+                    >
                         <Bell class="size-5" />
-                        <span class="absolute right-2.5 top-2.5 size-2 rounded-full bg-red-500 ring-2 ring-white" />
-                    </button>
+                        <span v-if="unread > 0" class="absolute right-2.5 top-2.5 size-2 rounded-full bg-red-500 ring-2 ring-white" />
+                    </Link>
                     <button class="flex cursor-pointer items-center gap-2.5">
                         <Avatar class="size-9">
                             <AvatarImage src="https://i.pravatar.cc/80?img=47" alt="Olena Franko" />
@@ -52,5 +62,27 @@ function submitSearch() {
         <main class="mx-auto max-w-[1320px] px-4 py-8 sm:px-6 sm:py-10">
             <slot />
         </main>
+
+        <!-- Global notification toast (near real-time via polling) -->
+        <Teleport to="body">
+            <Transition
+                enter-active-class="transition duration-300 ease-out" enter-from-class="opacity-0 translate-y-4"
+                leave-active-class="transition duration-200 ease-in" leave-to-class="opacity-0 translate-y-4"
+            >
+                <div v-if="toast" class="fixed bottom-6 right-6 z-50 w-80 rounded-2xl border border-red-200 bg-red-50 p-4 shadow-xl">
+                    <div class="flex items-start justify-between">
+                        <span class="rounded-full bg-red-500 px-2.5 py-1 text-xs font-semibold text-white">CHECK IT OUT</span>
+                        <button @click="toast = null" class="cursor-pointer text-neutral-400 hover:text-neutral-700"><X class="size-4" /></button>
+                    </div>
+                    <p class="mt-2 text-sm font-semibold text-neutral-900">{{ toast.title }}</p>
+                    <p class="mt-1 text-xs text-neutral-500">New risk factors recorded. Review the case and assess next steps.</p>
+                    <Link
+                        :href="`/children/${toast.child_id}`"
+                        @click="toast = null"
+                        class="mt-3 inline-flex cursor-pointer items-center gap-1 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50"
+                    >More details <ChevronRight class="size-4" /></Link>
+                </div>
+            </Transition>
+        </Teleport>
     </div>
 </template>
