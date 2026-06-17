@@ -25,14 +25,14 @@ const props = defineProps<{
 const tabs = [
     { value: 'all', label: 'All' },
     { value: 'check_it_out', label: 'Check It Out' },
-    { value: 'in_progress', label: 'In Process' },
+    { value: 'in_progress', label: 'In Progress' },
     { value: 'done', label: 'Resolved' },
 ];
 
 const badge: Record<string, { cls: string; label: string }> = {
-    check_it_out: { cls: 'bg-red-500 text-white', label: 'Check It Out' },
-    in_progress: { cls: 'bg-sky-500 text-white', label: 'In Process' },
-    resolved: { cls: 'bg-emerald-500 text-white', label: 'Resolved' },
+    check_it_out: { cls: 'bg-red-500 text-white', label: 'CHECK IT OUT' },
+    in_progress: { cls: 'bg-sky-500 text-white', label: 'IN PROGRESS' },
+    resolved: { cls: 'bg-emerald-500 text-white', label: 'RESOLVED' },
 };
 
 function selectTab(id: string) {

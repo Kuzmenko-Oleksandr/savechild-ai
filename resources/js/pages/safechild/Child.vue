@@ -65,9 +65,9 @@ const props = defineProps<{
 }>();
 
 const badge: Record<string, { cls: string; label: string }> = {
-    check_it_out: { cls: 'bg-red-500 text-white', label: 'Check It Out' },
-    in_progress: { cls: 'bg-sky-500 text-white', label: 'In Process' },
-    resolved: { cls: 'bg-emerald-500 text-white', label: 'Resolved' },
+    check_it_out: { cls: 'bg-red-500 text-white', label: 'CHECK IT OUT' },
+    in_progress: { cls: 'bg-sky-500 text-white', label: 'IN PROGRESS' },
+    resolved: { cls: 'bg-emerald-500 text-white', label: 'RESOLVED' },
 };
 
 const expanded = ref<number | null>(null); // initial state: collapsed
