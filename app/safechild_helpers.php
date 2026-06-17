@@ -55,7 +55,7 @@ if (! function_exists('safechild_dataset')) {
                 'eventDate' => $event[1],
                 'updated' => $updates[($i * 17) % count($updates)],
                 'updated_days' => ($i * 37) % 400,
-                'photo' => "/photos/child-$photoNum.jpg",
+                'photo' => "/photos/child-$photoNum.png",
             ];
         }
 

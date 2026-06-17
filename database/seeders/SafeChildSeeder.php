@@ -59,7 +59,7 @@ class SafeChildSeeder extends Seeder
                 'guardians' => 'Olena Petrenko, Serhii Petrenko',
                 'contact' => '+380 67 '.str_pad((string) (100 + $i % 900), 3, '0', STR_PAD_LEFT).' 45 67',
                 'address' => (10 + $i % 80).' Shevchenka St., Apt. '.(1 + $i % 90).', Kyiv',
-                'photo' => "/photos/child-$photoNum.jpg",
+                'photo' => "/photos/child-$photoNum.png",
                 'age' => (int) $r['age'],
                 'age_group' => $r['age_group'],
                 'household_income_level' => $r['household_income_level'],
