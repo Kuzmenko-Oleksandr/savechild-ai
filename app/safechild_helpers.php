@@ -135,8 +135,8 @@ if (! function_exists('sc_notif')) {
     {
         $legacyBodyHash = 'dbaa37f5509bb5ffd47e2536c0289a9127162fb084be4fbd64d96f992cd3a0cc';
         $legacyNoteHash = 'fb13c966b8cddaab256b4b3684cc53639727e32c84743653e9b2cbc74e33363c';
-        $body = hash('sha256', (string) $n->body) === $legacyBodyHash
-            ? "Over the last three months, the system detected several risk factors that may indicate a decline in the child's well-being. It found unexcused school absences, a family incident that resulted in a police report, and a disciplinary note from the educational institution.\n\nThe available data shows recurring events across different areas of the child's life, which increased the risk level to High.\n\nA review of the child's living conditions is recommended, along with clarifying school attendance details and considering whether the family needs additional social support."
+        $body = $n->type === 'risk_elevated' || hash('sha256', (string) $n->body) === $legacyBodyHash
+            ? sc_notification_body($n)
             : $n->body;
         $attachments = collect($n->attachments ?? [])->map(function ($attachment) use ($legacyNoteHash) {
             if (hash('sha256', (string) ($attachment['note'] ?? '')) === $legacyNoteHash) {
@@ -163,6 +163,116 @@ if (! function_exists('sc_notif')) {
         }
 
         return $data;
+    }
+}
+
+if (! function_exists('sc_notification_body')) {
+    function sc_notification_body(\App\Models\CaseNotification $n): string
+    {
+        $child = $n->relationLoaded('child') && $n->child
+            ? $n->child
+            : \App\Models\Child::query()->find($n->child_id);
+
+        $events = \App\Models\Event::query()
+            ->where('child_id', $n->child_id)
+            ->orderByDesc('event_date')
+            ->orderByDesc('score')
+            ->limit(8)
+            ->get();
+
+        $priority = sc_level($child?->predicted_priority) ?? 'High';
+        $eventNames = $events
+            ->sortByDesc('score')
+            ->take(3)
+            ->map(fn ($event) => sc_event_phrase($event))
+            ->filter()
+            ->values()
+            ->all();
+
+        $sources = $events
+            ->pluck('event_source')
+            ->filter()
+            ->unique()
+            ->map(fn ($source) => [
+                'school' => 'school',
+                'medical' => 'medical',
+                'police' => 'police',
+            ][$source] ?? $source)
+            ->values()
+            ->all();
+
+        $found = $eventNames
+            ? 'It found '.sc_join_words($eventNames).'.'
+            : 'It found several recorded risk indicators in the case history.';
+
+        $scope = $sources
+            ? 'across '.sc_join_words($sources).' records'
+            : 'across the available case records';
+
+        $recommendations = sc_notification_recommendations($events, $child);
+
+        return "Over the last three months, the system detected several risk factors that may indicate a decline in the child's well-being. {$found}\n\n"
+            ."The available data shows recurring events {$scope}, which increased the risk level to {$priority}.\n\n"
+            .$recommendations;
+    }
+}
+
+if (! function_exists('sc_event_phrase')) {
+    function sc_event_phrase(\App\Models\Event $event): string
+    {
+        $name = trim((string) $event->event_name);
+        if ($name === '') {
+            $name = \Illuminate\Support\Str::headline((string) $event->event_type);
+        }
+
+        return match ($event->event_source) {
+            'school' => strtolower($name).' from the educational institution',
+            'police' => strtolower($name).' that resulted in a police record',
+            'medical' => strtolower($name).' from medical or support services',
+            default => strtolower($name),
+        };
+    }
+}
+
+if (! function_exists('sc_notification_recommendations')) {
+    function sc_notification_recommendations(\Illuminate\Support\Collection $events, ?\App\Models\Child $child): string
+    {
+        $types = $events->pluck('event_type')->map(fn ($type) => (string) $type)->all();
+        $sources = $events->pluck('event_source')->map(fn ($source) => (string) $source)->all();
+        $actions = [];
+
+        if (in_array('police', $sources, true) || collect($types)->contains(fn ($type) => str_contains($type, 'violence') || str_contains($type, 'police'))) {
+            $actions[] = "reviewing the child's living conditions";
+        }
+        if (in_array('school', $sources, true) || collect($types)->contains(fn ($type) => str_contains($type, 'attendance') || str_contains($type, 'absence') || str_contains($type, 'school'))) {
+            $actions[] = 'clarifying school attendance and disciplinary details';
+        }
+        if (in_array('medical', $sources, true) || (bool) ($child?->chronic_health_condition)) {
+            $actions[] = 'checking whether medical or psychological support is needed';
+        }
+        if ((bool) ($child?->active_social_case) || (bool) ($child?->single_parent) || (bool) ($child?->parent_unemployed)) {
+            $actions[] = 'considering whether the family needs additional social support';
+        }
+
+        if (! $actions) {
+            $actions[] = "reviewing the child's current situation";
+            $actions[] = 'clarifying the latest recorded risk events';
+            $actions[] = 'checking whether additional family support is needed';
+        }
+
+        return 'A review is recommended, including '.sc_join_words(array_slice(array_values(array_unique($actions)), 0, 3)).'.';
+    }
+}
+
+if (! function_exists('sc_join_words')) {
+    function sc_join_words(array $items): string
+    {
+        $items = array_values(array_filter($items));
+        if (count($items) <= 1) {
+            return $items[0] ?? '';
+        }
+
+        return implode(', ', array_slice($items, 0, -1)).' and '.$items[array_key_last($items)];
     }
 }
 

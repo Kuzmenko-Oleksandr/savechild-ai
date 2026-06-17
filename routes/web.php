@@ -63,6 +63,83 @@ Route::get('/', function () {
     ]);
 })->name('home');
 
+Route::get('/mainadmin', function () {
+    $byPriority = Child::query()
+        ->selectRaw('predicted_priority, count(*) c')
+        ->groupBy('predicted_priority')->pluck('c', 'predicted_priority');
+    $low = (int) ($byPriority['LOW'] ?? 0);
+    $medium = (int) ($byPriority['MEDIUM'] ?? 0);
+    $high = (int) ($byPriority['HIGH'] ?? 0);
+    $all = Child::count();
+
+    $fmt = fn (int $n) => number_format($n, 0, '.', ' ');
+
+    // Dynamic deltas from the two most recent risk snapshots.
+    $snaps = DB::table('risk_snapshots')->orderByDesc('captured_on')->limit(2)->get();
+    $cur = $snaps[0] ?? null;
+    $prev = $snaps[1] ?? null;
+    $delta = function (string $key) use ($cur, $prev) {
+        if (! $cur || ! $prev || ($prev->$key ?? 0) == 0) {
+            return [null, 'up'];
+        }
+        $pct = (($cur->$key - $prev->$key) / $prev->$key) * 100;
+
+        return [number_format(abs($pct), 2).'%', $pct >= 0 ? 'up' : 'down'];
+    };
+    [$dl, $tl] = $delta('low');
+    [$dm, $tm] = $delta('medium');
+    [$dh, $th] = $delta('high');
+
+    // Analytics donut: case notifications by status.
+    $byStatus = \App\Models\CaseNotification::query()
+        ->selectRaw('status, count(*) c')
+        ->groupBy('status')->pluck('c', 'status');
+    $checkItOut = (int) ($byStatus['check_it_out'] ?? 0);
+    $inProgress = (int) ($byStatus['in_progress'] ?? 0);
+    $resolved = (int) ($byStatus['resolved'] ?? 0);
+    $totalCases = $checkItOut + $inProgress + $resolved;
+
+    // Case closing efficiency leaderboard (demo — would be a workers table in prod).
+    $efficiency = [
+        ['name' => 'Martin Kask', 'role' => 'Social Worker', 'percent' => 82, 'color' => 'bg-emerald-500', 'photo' => 'https://i.pravatar.cc/96?img=12', 'initials' => 'MK'],
+        ['name' => 'Andrii Melnyk', 'role' => 'Child Psychologist', 'percent' => 75, 'color' => 'bg-amber-400', 'photo' => 'https://i.pravatar.cc/96?img=11', 'initials' => 'AM'],
+        ['name' => 'Iryna Bondarenko', 'role' => 'Juvenile Prevention Officer', 'percent' => 60, 'color' => 'bg-amber-400', 'photo' => 'https://i.pravatar.cc/96?img=5', 'initials' => 'IB'],
+        ['name' => 'Liis Tamm', 'role' => 'Family Support Specialist', 'percent' => 32, 'color' => 'bg-amber-400', 'photo' => 'https://i.pravatar.cc/96?img=9', 'initials' => 'LT'],
+        ['name' => 'Sander Saar', 'role' => 'Child Rights Coordinator', 'percent' => 10, 'color' => 'bg-red-500', 'photo' => 'https://i.pravatar.cc/96?img=13', 'initials' => 'SS'],
+    ];
+
+    $eventsRecent = Event::where('event_date', '>=', now()->subDays(30))->count();
+    $underSupervision = Child::where('status', 'under_supervision')->count();
+    $resolvedToday = \App\Models\CaseNotification::where('status', 'resolved')->whereDate('resolved_at', now()->toDateString())->count();
+
+    return Inertia::render('safechild/MainAdmin', [
+        'district' => 'Shevchenkivskyi district',
+        'asOf' => now()->format('d M Y, H:i'),
+        'currentUser' => ['name' => 'Martin Kask', 'photo' => 'https://i.pravatar.cc/80?img=12', 'initials' => 'MK'],
+        'admin' => ['name' => 'Martin Kask', 'photo' => 'https://i.pravatar.cc/80?img=12'],
+        'stats' => [
+            ['key' => 'all', 'label' => 'All children', 'value' => $fmt($all)],
+            ['key' => 'low', 'label' => 'Low Risk', 'value' => $fmt($low), 'delta' => $dl, 'trend' => $tl],
+            ['key' => 'medium', 'label' => 'Medium Risk', 'value' => $fmt($medium), 'delta' => $dm, 'trend' => $tm],
+            ['key' => 'high', 'label' => 'High Risk', 'value' => $fmt($high), 'delta' => $dh, 'trend' => $th],
+        ],
+        'analytics' => [
+            'total' => $totalCases,
+            'checkItOut' => $checkItOut,
+            'inProgress' => $inProgress,
+            'resolved' => $resolved,
+        ],
+        'efficiency' => $efficiency,
+        'today' => [
+            ['title' => $fmt($high).' children at high risk', 'description' => 'flagged by the priority model'],
+            ['title' => $fmt($eventsRecent).' new incidents', 'description' => 'recorded in the last 30 days'],
+            ['title' => $fmt($underSupervision).' cases under supervision', 'description' => 'currently in progress'],
+            ['title' => $fmt($resolvedToday).' cases resolved', 'description' => 'marked done today'],
+        ],
+        'trends' => sc_trends_from_events(),
+    ]);
+})->name('mainadmin');
+
 Route::get('/children', function (Request $request) {
     $perPageOptions = [10, 20, 50];
     $perPage = (int) $request->integer('per_page', 10);

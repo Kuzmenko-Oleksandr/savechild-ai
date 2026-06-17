@@ -1,21 +1,39 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
+import {
+    ChevronDown,
+    ChevronRight,
+    Search,
+    SlidersHorizontal,
+} from '@lucide/vue';
+import { onClickOutside, watchDebounced } from '@vueuse/core';
 import { computed, onUnmounted, reactive, ref } from 'vue';
-import { watchDebounced } from '@vueuse/core';
-import { ChevronRight, Search, SlidersHorizontal } from '@lucide/vue';
-import ChildrenTable, { type ChildRow } from '@/components/safechild/ChildrenTable.vue';
-import Pagination, { type PaginationMeta } from '@/components/safechild/Pagination.vue';
+import ChildrenTable from '@/components/safechild/ChildrenTable.vue';
+import type { ChildRow } from '@/components/safechild/ChildrenTable.vue';
+import Pagination from '@/components/safechild/Pagination.vue';
+import type { PaginationMeta } from '@/components/safechild/Pagination.vue';
 import PillTabs from '@/components/safechild/PillTabs.vue';
 import { filterPanelOpen as panelOpen } from '@/composables/usePanel';
 
 interface Filters {
-    q: string; level: string; school: string;
-    sex: string[]; event: string[]; age: string[]; status: string[]; period: number | null;
+    q: string;
+    level: string;
+    school: string;
+    sex: string[];
+    event: string[];
+    age: string[];
+    status: string[];
+    period: number | null;
 }
-interface Opt { value: string; label: string }
+interface Opt {
+    value: string;
+    label: string;
+}
 interface Options {
     schools: string[];
-    events: Opt[]; sexes: Opt[]; statuses: Opt[];
+    events: Opt[];
+    sexes: Opt[];
+    statuses: Opt[];
     ages: string[];
     periods: { value: number; label: string }[];
 }
@@ -29,8 +47,13 @@ const props = defineProps<{
 }>();
 
 const tabs = ['All', 'High', 'Medium', 'Low'] as const;
-const active = ref<(typeof tabs)[number]>((props.filters.level as (typeof tabs)[number]) || 'All');
+const active = ref<(typeof tabs)[number]>(
+    (props.filters.level as (typeof tabs)[number]) || 'All',
+);
 const search = ref(props.filters.q ?? '');
+const schoolSearch = ref('');
+const schoolSelectOpen = ref(false);
+const schoolSelectRef = ref<HTMLElement | null>(null);
 
 const form = reactive({
     sex: [...(props.filters.sex ?? [])] as string[],
@@ -41,16 +64,33 @@ const form = reactive({
     school: props.filters.school ?? '',
 });
 
-const tableKey = computed(() =>
-    `${props.pagination.current_page}|${props.sort.by}|${props.sort.dir}|${props.children.map((c) => c.id).join(',')}`,
+const tableKey = computed(
+    () =>
+        `${props.pagination.current_page}|${props.sort.by}|${props.sort.dir}|${props.children.map((c) => c.id).join(',')}`,
 );
 
-const activeFilterCount = computed(() =>
-    form.sex.length + form.age.length + form.event.length + form.status.length +
-    (form.period ? 1 : 0) + (form.school ? 1 : 0),
+const activeFilterCount = computed(
+    () =>
+        form.sex.length +
+        form.age.length +
+        form.event.length +
+        form.status.length +
+        (form.period ? 1 : 0) +
+        (form.school ? 1 : 0),
 );
+
+const filteredSchools = computed(() => {
+    const q = schoolSearch.value.trim().toLowerCase();
+
+    return q
+        ? props.filterOptions.schools.filter((school) =>
+              school.toLowerCase().includes(q),
+          )
+        : props.filterOptions.schools;
+});
 
 onUnmounted(() => (panelOpen.value = false));
+onClickOutside(schoolSelectRef, () => (schoolSelectOpen.value = false));
 
 function togglePeriod(v: number) {
     form.period = form.period === v ? null : v;
@@ -58,21 +98,36 @@ function togglePeriod(v: number) {
 }
 
 function reload(overrides: Record<string, unknown> = {}) {
-    router.get('/children', {
-        level: active.value === 'All' ? null : active.value,
-        q: search.value || null,
-        sex: form.sex.length ? form.sex : null,
-        age: form.age.length ? form.age : null,
-        event: form.event.length ? form.event : null,
-        status: form.status.length ? form.status : null,
-        period: form.period || null,
-        school: form.school || null,
-        sort: props.sort.by || null,
-        dir: props.sort.dir,
-        per_page: props.pagination.per_page,
-        page: 1,
-        ...overrides,
-    }, { preserveState: true, preserveScroll: true, replace: true, only: ['children', 'pagination', 'filters', 'sort', 'filterOptions'] });
+    router.get(
+        '/children',
+        {
+            level: active.value === 'All' ? null : active.value,
+            q: search.value || null,
+            sex: form.sex.length ? form.sex : null,
+            age: form.age.length ? form.age : null,
+            event: form.event.length ? form.event : null,
+            status: form.status.length ? form.status : null,
+            period: form.period || null,
+            school: form.school || null,
+            sort: props.sort.by || null,
+            dir: props.sort.dir,
+            per_page: props.pagination.per_page,
+            page: 1,
+            ...overrides,
+        },
+        {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+            only: [
+                'children',
+                'pagination',
+                'filters',
+                'sort',
+                'filterOptions',
+            ],
+        },
+    );
 }
 
 function selectTab(tab: (typeof tabs)[number]) {
@@ -80,35 +135,64 @@ function selectTab(tab: (typeof tabs)[number]) {
     reload();
 }
 function clearFilters() {
-    form.sex = []; form.age = []; form.event = []; form.status = []; form.period = null; form.school = '';
+    form.sex = [];
+    form.age = [];
+    form.event = [];
+    form.status = [];
+    form.period = null;
+    form.school = '';
+    schoolSearch.value = '';
+    schoolSelectOpen.value = false;
+    reload();
+}
+function selectSchool(school: string) {
+    form.school = school;
+    schoolSearch.value = '';
+    schoolSelectOpen.value = false;
     reload();
 }
 function onSort(key: string) {
     if (props.sort.by !== key) {
         reload({ sort: key, dir: 'asc' });
+
         return;
     }
 
     if (props.sort.dir === 'asc') {
         reload({ sort: key, dir: 'desc' });
+
         return;
     }
 
     reload({ sort: null, dir: null });
 }
 
-watchDebounced(search, (v) => {
-    if ((v || '') !== (props.filters.q || '')) reload();
-}, { debounce: 350 });
+watchDebounced(
+    search,
+    (v) => {
+        if ((v || '') !== (props.filters.q || '')) {
+            reload();
+        }
+    },
+    { debounce: 350 },
+);
 </script>
 
 <template>
     <Head title="Children" />
 
     <div class="flex flex-wrap items-start justify-between gap-3">
-        <h1 class="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">Children</h1>
-        <nav class="mt-1 flex items-center gap-2 text-sm text-neutral-400 sm:mt-3">
-            <Link href="/" class="cursor-pointer hover:text-neutral-600">Home</Link>
+        <h1
+            class="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl"
+        >
+            Children
+        </h1>
+        <nav
+            class="mt-1 flex items-center gap-2 text-sm text-neutral-400 sm:mt-3"
+        >
+            <Link href="/" class="cursor-pointer hover:text-neutral-600"
+                >Home</Link
+            >
             <ChevronRight class="size-4" />
             <span class="font-medium text-neutral-900">Children</span>
         </nav>
@@ -116,94 +200,299 @@ watchDebounced(search, (v) => {
 
     <!-- Page search -->
     <div class="relative mt-6">
-        <Search class="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
+        <Search
+            class="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-neutral-400"
+        />
         <input
             v-model="search"
             type="text"
             placeholder="Search child"
-            class="h-12 w-full rounded-full border border-neutral-200 bg-white pl-11 pr-4 text-sm text-neutral-700 placeholder:text-neutral-400 focus:border-neutral-300 focus:outline-none focus:ring-4 focus:ring-neutral-100"
+            class="h-12 w-full rounded-full border border-neutral-200 bg-white pr-4 pl-11 text-sm text-neutral-700 placeholder:text-neutral-400 focus:border-neutral-300 focus:ring-4 focus:ring-neutral-100 focus:outline-none"
         />
     </div>
 
     <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <PillTabs :tabs="tabs.map((t) => ({ value: t, label: t }))" :model-value="active" uppercase @update:model-value="(v) => selectTab(v as any)" />
+        <PillTabs
+            :tabs="tabs.map((t) => ({ value: t, label: t }))"
+            :model-value="active"
+            @update:model-value="(v) => selectTab(v as any)"
+        />
 
         <button
             @click="panelOpen = !panelOpen"
             class="inline-flex cursor-pointer items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50"
-            :class="(activeFilterCount || panelOpen) ? 'border-neutral-900' : 'border-neutral-200'"
+            :class="
+                activeFilterCount || panelOpen
+                    ? 'border-neutral-900'
+                    : 'border-neutral-200'
+            "
         >
             <SlidersHorizontal class="size-4" /> Filter
-            <span v-if="activeFilterCount" class="flex size-5 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white">{{ activeFilterCount }}</span>
+            <span
+                v-if="activeFilterCount"
+                class="flex size-5 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white"
+                >{{ activeFilterCount }}</span
+            >
         </button>
     </div>
 
     <!-- Full-width filter panel -->
     <Teleport to="body">
-        <Transition enter-active-class="transition duration-200" enter-from-class="opacity-0" leave-active-class="transition duration-150" leave-to-class="opacity-0">
-            <div v-if="panelOpen" class="fixed inset-0 top-[72px] z-40 bg-black/20" @click="panelOpen = false" />
+        <Transition
+            enter-active-class="transition duration-200"
+            enter-from-class="opacity-0"
+            leave-active-class="transition duration-150"
+            leave-to-class="opacity-0"
+        >
+            <div
+                v-if="panelOpen"
+                class="fixed inset-0 top-[72px] z-40 bg-black/20"
+                @click="panelOpen = false"
+            />
         </Transition>
-        <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 -translate-y-3" leave-active-class="transition duration-150 ease-in" leave-to-class="opacity-0 -translate-y-3">
-        <div v-if="panelOpen" class="fixed left-0 right-0 top-[72px] z-50 border-t border-neutral-100 bg-white shadow-xl">
-            <div class="mx-auto max-w-[1320px] px-6 py-7">
-                <div class="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-3 lg:grid-cols-6">
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">Sex</p>
-                        <label v-for="s in filterOptions.sexes" :key="s.value" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :value="s.value" v-model="form.sex" @change="reload()" class="size-[18px] cursor-pointer rounded accent-neutral-900" /> {{ s.label }}
-                        </label>
+        <Transition
+            enter-active-class="transition duration-200 ease-out"
+            enter-from-class="opacity-0 -translate-y-3"
+            leave-active-class="transition duration-150 ease-in"
+            leave-to-class="opacity-0 -translate-y-3"
+        >
+            <div
+                v-if="panelOpen"
+                class="fixed top-[72px] right-0 left-0 z-50 border-t border-neutral-100 bg-white shadow-xl"
+            >
+                <div class="mx-auto max-w-[1320px] px-6 py-7">
+                    <div
+                        class="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-3 lg:grid-cols-6"
+                    >
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                Sex
+                            </p>
+                            <label
+                                v-for="s in filterOptions.sexes"
+                                :key="s.value"
+                                class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :value="s.value"
+                                    v-model="form.sex"
+                                    @change="reload()"
+                                    class="size-[18px] cursor-pointer rounded accent-neutral-900"
+                                />
+                                {{ s.label }}
+                            </label>
+                        </div>
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                Age
+                            </p>
+                            <label
+                                v-for="a in filterOptions.ages"
+                                :key="a"
+                                class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :value="a"
+                                    v-model="form.age"
+                                    @change="reload()"
+                                    class="size-[18px] cursor-pointer rounded accent-neutral-900"
+                                />
+                                {{ a }} years
+                            </label>
+                        </div>
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                Status
+                            </p>
+                            <label
+                                v-for="s in filterOptions.statuses"
+                                :key="s.value"
+                                class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :value="s.value"
+                                    v-model="form.status"
+                                    @change="reload()"
+                                    class="size-[18px] cursor-pointer rounded accent-neutral-900"
+                                />
+                                {{ s.label }}
+                            </label>
+                        </div>
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                Event type
+                            </p>
+                            <label
+                                v-for="e in filterOptions.events"
+                                :key="e.value"
+                                class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :value="e.value"
+                                    v-model="form.event"
+                                    @change="reload()"
+                                    class="size-[18px] shrink-0 cursor-pointer rounded accent-neutral-900"
+                                />
+                                {{ e.label }}
+                            </label>
+                        </div>
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                Period
+                            </p>
+                            <label
+                                v-for="p in filterOptions.periods"
+                                :key="p.value"
+                                class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :checked="form.period === p.value"
+                                    @change="togglePeriod(p.value)"
+                                    class="size-[18px] cursor-pointer rounded accent-neutral-900"
+                                />
+                                {{ p.label }}
+                            </label>
+                        </div>
+                        <div>
+                            <p
+                                class="mb-3 text-xs font-medium text-neutral-400"
+                            >
+                                School
+                            </p>
+                            <div ref="schoolSelectRef" class="relative">
+                                <button
+                                    type="button"
+                                    @click="
+                                        schoolSelectOpen = !schoolSelectOpen
+                                    "
+                                    class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-left text-sm transition focus:border-neutral-300 focus:ring-4 focus:ring-neutral-100 focus:outline-none"
+                                    :class="
+                                        form.school
+                                            ? 'text-neutral-700'
+                                            : 'text-neutral-400'
+                                    "
+                                >
+                                    <span class="truncate">{{
+                                        form.school || 'Select option'
+                                    }}</span>
+                                    <ChevronDown
+                                        class="size-4 shrink-0 text-neutral-400"
+                                    />
+                                </button>
+
+                                <div
+                                    v-if="schoolSelectOpen"
+                                    class="absolute right-0 left-0 z-20 mt-2 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg"
+                                >
+                                    <div
+                                        class="border-b border-neutral-100 p-2"
+                                    >
+                                        <div class="relative">
+                                            <Search
+                                                class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-neutral-400"
+                                            />
+                                            <input
+                                                v-model="schoolSearch"
+                                                type="text"
+                                                placeholder="Search school"
+                                                class="h-9 w-full rounded-lg border border-neutral-200 bg-white pr-3 pl-9 text-sm text-neutral-700 placeholder:text-neutral-400 focus:border-neutral-300 focus:ring-4 focus:ring-neutral-100 focus:outline-none"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="max-h-56 overflow-y-auto py-1">
+                                        <button
+                                            v-if="form.school"
+                                            type="button"
+                                            @click="selectSchool('')"
+                                            class="flex w-full cursor-pointer px-3 py-2 text-left text-sm text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-800"
+                                        >
+                                            Select option
+                                        </button>
+                                        <button
+                                            v-for="s in filteredSchools"
+                                            :key="s"
+                                            type="button"
+                                            @click="selectSchool(s)"
+                                            class="flex w-full cursor-pointer px-3 py-2 text-left text-sm transition hover:bg-neutral-50"
+                                            :class="
+                                                form.school === s
+                                                    ? 'font-medium text-neutral-900'
+                                                    : 'text-neutral-600'
+                                            "
+                                        >
+                                            {{ s }}
+                                        </button>
+                                        <p
+                                            v-if="!filteredSchools.length"
+                                            class="px-3 py-3 text-sm text-neutral-400"
+                                        >
+                                            No schools found.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">Age</p>
-                        <label v-for="a in filterOptions.ages" :key="a" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :value="a" v-model="form.age" @change="reload()" class="size-[18px] cursor-pointer rounded accent-neutral-900" /> {{ a }} years
-                        </label>
+                    <div v-if="activeFilterCount" class="mt-5 flex justify-end">
+                        <button
+                            @click="clearFilters"
+                            class="cursor-pointer text-sm font-medium text-neutral-500 hover:text-neutral-800"
+                        >
+                            Clear all
+                        </button>
                     </div>
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">Status</p>
-                        <label v-for="s in filterOptions.statuses" :key="s.value" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :value="s.value" v-model="form.status" @change="reload()" class="size-[18px] cursor-pointer rounded accent-neutral-900" /> {{ s.label }}
-                        </label>
-                    </div>
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">Event type</p>
-                        <label v-for="e in filterOptions.events" :key="e.value" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :value="e.value" v-model="form.event" @change="reload()" class="size-[18px] shrink-0 cursor-pointer rounded accent-neutral-900" /> {{ e.label }}
-                        </label>
-                    </div>
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">Period</p>
-                        <label v-for="p in filterOptions.periods" :key="p.value" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :checked="form.period === p.value" @change="togglePeriod(p.value)" class="size-[18px] cursor-pointer rounded accent-neutral-900" /> {{ p.label }}
-                        </label>
-                    </div>
-                    <div>
-                        <p class="mb-3 text-xs font-medium text-neutral-400">School</p>
-                        <select v-model="form.school" @change="reload()" class="w-full cursor-pointer rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm focus:border-neutral-300 focus:outline-none focus:ring-4 focus:ring-neutral-100">
-                            <option value="">Select option</option>
-                            <option v-for="s in filterOptions.schools" :key="s" :value="s">{{ s }}</option>
-                        </select>
-                    </div>
-                </div>
-                <div v-if="activeFilterCount" class="mt-5 flex justify-end">
-                    <button @click="clearFilters" class="cursor-pointer text-sm font-medium text-neutral-500 hover:text-neutral-800">Clear all</button>
                 </div>
             </div>
-        </div>
         </Transition>
     </Teleport>
 
     <section class="mt-5 rounded-2xl bg-white p-4 sm:p-6">
-        <Transition mode="out-in"
-            enter-active-class="transition-opacity duration-150 ease-out" enter-from-class="opacity-0"
-            leave-active-class="transition-opacity duration-100 ease-in" leave-to-class="opacity-0">
+        <Transition
+            mode="out-in"
+            enter-active-class="transition-opacity duration-150 ease-out"
+            enter-from-class="opacity-0"
+            leave-active-class="transition-opacity duration-100 ease-in"
+            leave-to-class="opacity-0"
+        >
             <div :key="tableKey">
-                <ChildrenTable :rows="children" sortable :sort="sort" @sort="onSort" />
-                <p v-if="!children.length" class="py-10 text-center text-sm text-neutral-400">No children match your filters.</p>
+                <ChildrenTable
+                    :rows="children"
+                    sortable
+                    :sort="sort"
+                    @sort="onSort"
+                />
+                <p
+                    v-if="!children.length"
+                    class="py-10 text-center text-sm text-neutral-400"
+                >
+                    No children match your filters.
+                </p>
             </div>
         </Transition>
-        <div v-if="pagination.total" class="mt-6 border-t border-neutral-100 pt-5">
-            <Pagination :meta="pagination" @change="({ page }) => reload({ page })" @per-page="({ per_page }) => reload({ per_page, page: 1 })" />
+        <div
+            v-if="pagination.total"
+            class="mt-6 border-t border-neutral-100 pt-5"
+        >
+            <Pagination
+                :meta="pagination"
+                @change="({ page }) => reload({ page })"
+                @per-page="({ per_page }) => reload({ per_page, page: 1 })"
+            />
         </div>
     </section>
 </template>

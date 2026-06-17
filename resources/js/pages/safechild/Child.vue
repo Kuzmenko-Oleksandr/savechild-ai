@@ -12,9 +12,16 @@ import {
     Shield,
     Sparkles,
 } from '@lucide/vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import RiskBadge from '@/components/safechild/RiskBadge.vue';
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+} from 'vue';
 import PillTabs from '@/components/safechild/PillTabs.vue';
+import RiskBadge from '@/components/safechild/RiskBadge.vue';
 
 interface RiskFactor {
     label: string;
@@ -58,9 +65,9 @@ const props = defineProps<{
 }>();
 
 const badge: Record<string, { cls: string; label: string }> = {
-    check_it_out: { cls: 'bg-red-500 text-white', label: 'CHECK IT OUT' },
-    in_progress: { cls: 'bg-sky-500 text-white', label: 'IN PROCESS' },
-    resolved: { cls: 'bg-emerald-500 text-white', label: 'RESOLVED' },
+    check_it_out: { cls: 'bg-red-500 text-white', label: 'Check It Out' },
+    in_progress: { cls: 'bg-sky-500 text-white', label: 'In Process' },
+    resolved: { cls: 'bg-emerald-500 text-white', label: 'Resolved' },
 };
 
 const expanded = ref<number | null>(null); // initial state: collapsed
@@ -75,12 +82,20 @@ const aiBorderAnimating = ref(true);
 const profileCard = ref<HTMLElement | null>(null);
 const aiScroll = ref<HTMLElement | null>(null);
 const aiScrollTrack = ref<HTMLElement | null>(null);
+const topRiskCard = ref<HTMLElement | null>(null);
+const eventScroll = ref<HTMLElement | null>(null);
+const eventScrollTrack = ref<HTMLElement | null>(null);
 const profileHeight = ref<number | null>(null);
+const topRiskHeight = ref<number | null>(null);
 const isLargeScreen = ref(false);
 const scrollThumbTop = ref(0);
 const scrollThumbHeight = ref(0);
+const eventScrollThumbTop = ref(0);
+const eventScrollThumbHeight = ref(0);
 let profileResizeObserver: ResizeObserver | null = null;
 let aiScrollResizeObserver: ResizeObserver | null = null;
+let topRiskResizeObserver: ResizeObserver | null = null;
+let eventScrollResizeObserver: ResizeObserver | null = null;
 
 // Border spin duration in CSS (.ai-summary-border-spin). Must stay in sync.
 const AI_BORDER_CYCLE_MS = 1600;
@@ -125,6 +140,10 @@ const visibleEvents = computed(() => {
     return props.eventHistory.filter((e) => e.months <= max);
 });
 
+watch(visibleEvents, () => {
+    void nextTick(updateEventScrollThumb);
+});
+
 const aiCardStyle = computed(() => {
     if (!isLargeScreen.value || !profileHeight.value) {
         return {};
@@ -138,9 +157,22 @@ const aiScrollThumbStyle = computed(() => ({
     transform: `translateY(${scrollThumbTop.value}px)`,
 }));
 
+const eventHistoryStyle = computed(() => {
+    if (!isLargeScreen.value || !topRiskHeight.value) {
+        return {};
+    }
+
+    return { height: `${topRiskHeight.value}px` };
+});
+
+const eventScrollThumbStyle = computed(() => ({
+    height: `${eventScrollThumbHeight.value}px`,
+    transform: `translateY(${eventScrollThumbTop.value}px)`,
+}));
+
 onMounted(() => {
-    updateAiCardSize();
-    window.addEventListener('resize', updateAiCardSize);
+    updateLayoutSizes();
+    window.addEventListener('resize', updateLayoutSizes);
 
     if (profileCard.value) {
         profileResizeObserver = new ResizeObserver(updateAiCardSize);
@@ -153,19 +185,44 @@ onMounted(() => {
         updateAiScrollThumb();
     }
 
+    if (topRiskCard.value) {
+        topRiskResizeObserver = new ResizeObserver(updateEventHistorySize);
+        topRiskResizeObserver.observe(topRiskCard.value);
+    }
+
+    if (eventScroll.value) {
+        eventScrollResizeObserver = new ResizeObserver(updateEventScrollThumb);
+        eventScrollResizeObserver.observe(eventScroll.value);
+    }
+
+    updateEventHistorySize();
+
     void loadAiSummary();
 });
 
 onBeforeUnmount(() => {
-    window.removeEventListener('resize', updateAiCardSize);
+    window.removeEventListener('resize', updateLayoutSizes);
     profileResizeObserver?.disconnect();
     aiScrollResizeObserver?.disconnect();
+    topRiskResizeObserver?.disconnect();
+    eventScrollResizeObserver?.disconnect();
 });
 
 function updateAiCardSize() {
     isLargeScreen.value = window.matchMedia('(min-width: 1024px)').matches;
     profileHeight.value = profileCard.value?.offsetHeight ?? null;
     void nextTick(updateAiScrollThumb);
+}
+
+function updateLayoutSizes() {
+    updateAiCardSize();
+    updateEventHistorySize();
+}
+
+function updateEventHistorySize() {
+    isLargeScreen.value = window.matchMedia('(min-width: 1024px)').matches;
+    topRiskHeight.value = topRiskCard.value?.offsetHeight ?? null;
+    void nextTick(updateEventScrollThumb);
 }
 
 function updateAiScrollThumb() {
@@ -193,6 +250,31 @@ function updateAiScrollThumb() {
         maxScroll > 0 ? (el.scrollTop / maxScroll) * maxThumbTop : 0;
 }
 
+function updateEventScrollThumb() {
+    const el = eventScroll.value;
+    const track = eventScrollTrack.value;
+
+    if (!el || !track) {
+        return;
+    }
+
+    const trackHeight = track.clientHeight;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    const minThumbHeight = 36;
+    const thumbHeight =
+        maxScroll > 0
+            ? Math.max(
+                  minThumbHeight,
+                  (el.clientHeight / el.scrollHeight) * trackHeight,
+              )
+            : trackHeight;
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+
+    eventScrollThumbHeight.value = thumbHeight;
+    eventScrollThumbTop.value =
+        maxScroll > 0 ? (el.scrollTop / maxScroll) * maxThumbTop : 0;
+}
+
 async function waitForPaint() {
     await nextTick();
     await new Promise<void>((resolve) =>
@@ -206,13 +288,22 @@ function sleep(ms: number) {
     return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function typewriter(text: string, setter: (v: string) => void, speed = 4) {
+async function typewriter(
+    text: string,
+    setter: (v: string) => void,
+    speed = 4,
+) {
     for (let i = 0; i <= text.length; i++) {
         setter(text.slice(0, i));
+
         // Update virtual scrollbar as the text grows.
-        if (i % 24 === 0) updateAiScrollThumb();
+        if (i % 24 === 0) {
+            updateAiScrollThumb();
+        }
+
         await sleep(speed);
     }
+
     updateAiScrollThumb();
 }
 
@@ -253,6 +344,7 @@ async function loadAiSummary() {
             await sleep(140);
             updateAiScrollThumb();
         }
+
         for (const r of recs) {
             recommendations.value.push(r);
             await sleep(140);
@@ -267,7 +359,8 @@ async function loadAiSummary() {
 
         // Finish the current border cycle cleanly + one full extra rotation.
         const elapsed = performance.now() - aiBorderStartedAt;
-        const finishCurrent = AI_BORDER_CYCLE_MS - (elapsed % AI_BORDER_CYCLE_MS);
+        const finishCurrent =
+            AI_BORDER_CYCLE_MS - (elapsed % AI_BORDER_CYCLE_MS);
         await sleep(finishCurrent + AI_BORDER_CYCLE_MS);
         aiBorderAnimating.value = false;
     }
@@ -463,7 +556,7 @@ async function loadAiSummary() {
             :style="aiCardStyle"
         >
             <section
-                class="ai-summary-card relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-blue-50/95 p-5"
+                class="ai-summary-card relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-blue-50/95 p-5 pb-0"
             >
                 <Sparkles class="size-6 shrink-0 text-blue-500" />
                 <h2 class="mt-2 shrink-0 text-base font-semibold text-blue-600">
@@ -547,79 +640,105 @@ async function loadAiSummary() {
         </div>
 
         <!-- Event history -->
-        <section class="rounded-2xl bg-white p-4 sm:p-6">
-            <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <section
+            class="relative flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white p-4 sm:p-6"
+            :style="eventHistoryStyle"
+        >
+            <div
+                class="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-3"
+            >
                 <h2 class="text-lg font-semibold text-neutral-900">
                     Event History
                 </h2>
                 <PillTabs
-                    :tabs="periods.map((p) => ({ value: p.id, label: p.label }))"
+                    :tabs="
+                        periods.map((p) => ({ value: p.id, label: p.label }))
+                    "
                     :model-value="period"
                     @update:model-value="(v) => (period = v as typeof period)"
                 />
             </div>
 
-            <TransitionGroup
-                tag="ul"
-                enter-active-class="transition duration-300 ease-out"
-                enter-from-class="opacity-0 translate-y-2"
-                move-class="transition duration-300 ease-out"
+            <div
+                ref="eventScroll"
+                class="event-history-scroll min-h-0 flex-1 pr-5"
+                @scroll="updateEventScrollThumb"
             >
-                <li
-                    v-for="(ev, i) in visibleEvents"
-                    :key="`${ev.date}-${ev.title}-${i}`"
-                    class="flex gap-4"
+                <TransitionGroup
+                    tag="ul"
+                    enter-active-class="transition duration-300 ease-out"
+                    enter-from-class="opacity-0 translate-y-2"
+                    move-class="transition duration-300 ease-out"
                 >
-                    <div class="flex flex-col items-center">
-                        <span
-                            class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-500"
-                        >
-                            <component
-                                :is="categoryIcon[ev.category]"
-                                class="size-4"
-                            />
-                        </span>
-                        <span
-                            v-if="i < visibleEvents.length - 1"
-                            class="my-1 w-px flex-1 bg-neutral-200"
-                        />
-                    </div>
-                    <div class="flex-1 pb-6">
-                        <div class="text-sm font-semibold text-neutral-900">
-                            {{ ev.date }}
-                        </div>
-                        <div class="text-xs text-neutral-400">
-                            {{ ev.time }}
-                        </div>
-                        <div
-                            class="mt-2 flex items-start justify-between gap-3"
-                        >
-                            <p class="font-semibold text-neutral-900">
-                                {{ ev.title }}
-                            </p>
+                    <li
+                        v-for="(ev, i) in visibleEvents"
+                        :key="`${ev.date}-${ev.title}-${i}`"
+                        class="flex gap-4"
+                    >
+                        <div class="flex flex-col items-center">
                             <span
-                                class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-500"
-                                >{{ ev.category }}</span
+                                class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-500"
                             >
+                                <component
+                                    :is="categoryIcon[ev.category]"
+                                    class="size-4"
+                                />
+                            </span>
+                            <span
+                                v-if="i < visibleEvents.length - 1"
+                                class="my-1 w-px flex-1 bg-neutral-200"
+                            />
                         </div>
-                        <p
-                            class="mt-1 text-sm leading-relaxed text-neutral-500"
-                        >
-                            {{ ev.description }}
-                        </p>
-                    </div>
-                </li>
-            </TransitionGroup>
-            <p
-                v-if="!visibleEvents.length"
-                class="py-6 text-center text-sm text-neutral-400"
+                        <div class="flex-1 pb-6">
+                            <div class="text-sm font-semibold text-neutral-900">
+                                {{ ev.date }}
+                            </div>
+                            <div class="text-xs text-neutral-400">
+                                {{ ev.time }}
+                            </div>
+                            <div
+                                class="mt-2 flex items-start justify-between gap-3"
+                            >
+                                <p class="font-semibold text-neutral-900">
+                                    {{ ev.title }}
+                                </p>
+                                <span
+                                    class="shrink-0 rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-500"
+                                    >{{ ev.category }}</span
+                                >
+                            </div>
+                            <p
+                                class="mt-1 text-sm leading-relaxed text-neutral-500"
+                            >
+                                {{ ev.description }}
+                            </p>
+                        </div>
+                    </li>
+                </TransitionGroup>
+                <p
+                    v-if="!visibleEvents.length"
+                    class="py-6 text-center text-sm text-neutral-400"
+                >
+                    No events in this period.
+                </p>
+            </div>
+            <span
+                ref="eventScrollTrack"
+                class="event-history-scroll-track"
+                aria-hidden="true"
             >
-                No events in this period.
-            </p>
+                <span
+                    class="event-history-scroll-thumb"
+                    :style="eventScrollThumbStyle"
+                />
+            </span>
         </section>
 
         <!-- Top risk factors -->
-        <section class="h-fit rounded-2xl bg-white p-4 sm:p-6">
+        <section
+            ref="topRiskCard"
+            class="h-fit rounded-2xl bg-white p-4 sm:p-6"
+        >
             <h2 class="text-lg font-semibold text-neutral-900">
                 Top Risk Factors
             </h2>
@@ -775,6 +894,38 @@ async function loadAiSummary() {
     width: 100%;
     border-radius: inherit;
     background: #60a5fa;
+    transition:
+        height 160ms ease,
+        transform 80ms linear;
+}
+
+.event-history-scroll {
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.event-history-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.event-history-scroll-track {
+    position: absolute;
+    top: 5.5rem;
+    right: 0.75rem;
+    bottom: 1.5rem;
+    width: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e5e5e5;
+}
+
+.event-history-scroll-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border-radius: inherit;
+    background: #111827;
     transition:
         height 160ms ease,
         transform 80ms linear;
