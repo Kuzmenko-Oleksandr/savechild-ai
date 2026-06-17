@@ -18,7 +18,7 @@ interface Filters {
 }
 interface Options {
     schools: string[];
-    events: string[];
+    events: { value: string; label: string }[];
     sexes: { value: string; label: string }[];
     ages: string[];
     periods: { value: number; label: string }[];
@@ -154,9 +154,9 @@ watchDebounced(searchQuery, (val) => {
                     <!-- Event type -->
                     <div>
                         <p class="mb-3 text-xs font-medium text-neutral-400">Event type</p>
-                        <label v-for="e in filterOptions.events" :key="e" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
-                            <input type="checkbox" :value="e" v-model="form.event" @change="reload()" class="size-[18px] shrink-0 cursor-pointer rounded accent-neutral-900" />
-                            {{ e }}
+                        <label v-for="e in filterOptions.events" :key="e.value" class="mb-2.5 flex cursor-pointer items-center gap-2.5 text-sm text-neutral-700">
+                            <input type="checkbox" :value="e.value" v-model="form.event" @change="reload()" class="size-[18px] shrink-0 cursor-pointer rounded accent-neutral-900" />
+                            {{ e.label }}
                         </label>
                     </div>
 

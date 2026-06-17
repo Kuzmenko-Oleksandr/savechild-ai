@@ -74,3 +74,58 @@ if (! function_exists('safechild_trends')) {
         ];
     }
 }
+
+if (! function_exists('sc_level')) {
+    function sc_level(?string $priority): ?string
+    {
+        return $priority ? ucfirst(strtolower($priority)) : null;
+    }
+}
+
+if (! function_exists('sc_event_category')) {
+    function sc_event_category(string $source): string
+    {
+        return ['police' => 'Incident', 'school' => 'Education', 'medical' => 'Social'][$source] ?? 'Social';
+    }
+}
+
+if (! function_exists('sc_latest_events')) {
+    /** Latest event per child id => Event. */
+    function sc_latest_events(array $childIds): array
+    {
+        if (! $childIds) {
+            return [];
+        }
+        $events = \App\Models\Event::query()
+            ->whereIn('child_id', $childIds)
+            ->orderByDesc('event_date')
+            ->orderByDesc('id')
+            ->get();
+
+        $latest = [];
+        foreach ($events as $e) {
+            if (! isset($latest[$e->child_id])) {
+                $latest[$e->child_id] = $e;
+            }
+        }
+
+        return $latest;
+    }
+}
+
+if (! function_exists('sc_row')) {
+    function sc_row(\App\Models\Child $c, ?\App\Models\Event $ev): array
+    {
+        return [
+            'id' => $c->id,
+            'name' => $c->name,
+            'level' => sc_level($c->predicted_priority) ?? 'Low',
+            'age' => $c->age.' years',
+            'school' => $c->school,
+            'event' => $ev?->event_name ?? '—',
+            'eventDate' => $ev?->event_date ? '('.$ev->event_date->format('d M Y').')' : '',
+            'updated' => $ev?->event_date ? $ev->event_date->format('d M Y') : '—',
+            'photo' => $c->photo,
+        ];
+    }
+}

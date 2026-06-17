@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'ml' => [
+        'url' => env('ML_SERVICE_URL', 'http://127.0.0.1:8001'),
+        'key' => env('ML_SERVICE_KEY', ''),
+        'timeout' => env('ML_SERVICE_TIMEOUT', 60),
+    ],
+
 ];
